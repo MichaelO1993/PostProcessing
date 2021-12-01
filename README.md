@@ -22,7 +22,7 @@ The script is structured in:
 For using SmartAlign:
   - Download it as matlab version from: http://lewysjones.com/software/smart-align/
   - Copy these files in the *matlab* folder from this repository 
-  - Insert before the option lines in the SmartAlign_Wrapper_1_6.m script following lines:  
+  - Insert following lines before the option lines in the SmartAlign_Wrapper_1_6.m script:  
 	*addpath('./Smart_Align_1_6');  
 	cd('./Matlab_files') 
 	global number_stacks;  
