@@ -17,35 +17,5 @@ The script is structured in:
   - PCA denoising and mapping of the fine structure (saving images)
   - Saving complete notebook for documentation (nbconvert package have to be installed) 
 
-<br/><br/>
-
-For using SmartAlign:
-  - Download it as matlab version from: http://lewysjones.com/software/smart-align/
-  - Copy these files in the *matlab* folder from this repository 
-  - Insert following lines before the option lines in the SmartAlign_Wrapper_1_6.m script:  
-	*addpath('./Smart_Align_1_6');  
-	cd('./Matlab_files') 
-	global number_stacks;  
-	global pixels;  
-	global image_stack_translation;  
-	pixels = number_pixels;  
-	image_stack_translation = cell([2 number_stacks]);  
-	% Save translation matrix  
-	global i_count;  
-	global indexing;  
-	indexing = 0;  
-	i_count = cell([1 number_stacks]);  
-	% Avoid error with trimming (if crop_core is off)  
-	global y_trim;  
-	global x_trim;  
-	y_trim = 0;  
-	x_trim = 0;*
-  - Insert at the end of the script:  
-	*close all*
-  - Replace the downloaded movepixels_2d_double.m file with the movepixels_2d_double.m from this repository
-
-
-<br/><br/>
-
 
 If you use this script please cite:
