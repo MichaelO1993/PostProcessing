@@ -682,8 +682,9 @@ class PostProcessor:
         self.s.axes_manager[0].size = self.s_averaged_orig.axes_manager[2].size
 
         # Span initial region of interest
-        self.roi_background = hs.roi.SpanROI(left=self.s.axes_manager[0].offset, right=self.s.axes_manager[0].offset + self.s.axes_manager[0].scale*self.s.axes_manager[0].size/4)
-        self.roi_signal = hs.roi.SpanROI(left=self.s.axes_manager[0].offset + self.s.axes_manager[0].scale*self.s.axes_manager[0].size/3, right=self.s.axes_manager[0].offset + self.s.axes_manager[0].scale*self.s.axes_manager[0].size*2/4)
+        if self.roi_background == None:
+            self.roi_background = hs.roi.SpanROI(left=self.s.axes_manager[0].offset, right=self.s.axes_manager[0].offset + self.s.axes_manager[0].scale*self.s.axes_manager[0].size/4)
+            self.roi_signal = hs.roi.SpanROI(left=self.s.axes_manager[0].offset + self.s.axes_manager[0].scale*self.s.axes_manager[0].size/3, right=self.s.axes_manager[0].offset + self.s.axes_manager[0].scale*self.s.axes_manager[0].size*2/4)
 
 
         # Select background for removal and signal for integration
