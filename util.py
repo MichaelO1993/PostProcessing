@@ -8,8 +8,7 @@ import numpy as np
 import atomap.api as am
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.colors import ListedColormap, LinearSegmentedColormap
+from matplotlib.colors import ListedColormap
 import matplotlib.patches as patches
 import matplotlib.animation as animation
 from tkinter.filedialog import askopenfilename
@@ -18,7 +17,6 @@ from sklearn.manifold import TSNE
 from sklearn.cluster import OPTICS, cluster_optics_dbscan
 import pandas as pd
 import random
-import scipy.io
 from tqdm.notebook import tqdm_notebook
 from PIL import Image
 import sys
@@ -28,9 +26,6 @@ from lmfit import Model, Parameters
 from numpy.lib.stride_tricks import as_strided
 import cv2
 import scipy.ndimage as ndimage
-
-from scipy import ndimage
-from tqdm import tqdm
 from scipy.fft import fftn, ifftn, fftfreq
 
 
