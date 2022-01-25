@@ -11,10 +11,10 @@ The script is structured in:
   - Determining atom positions by Atomap for drift correction
   - Linear drift correction
   - Selecting atoms, which are used as center for the cropped SIs
-  - Aligning cells by SmartAlign (Matlab-engine required)
+  - Aligning cells by SmartAlign-algorithm
   - Calculating L2-norm to exclude "bad" slices
   - Averaging spectrum image
-  - PCA denoising and mapping of the fine structure (saving images)
+  - PCA denoising and mapping of the fine structure (saving images, saving denoised spectrum image for GMS)
   - Saving complete notebook for documentation (nbconvert package have to be installed) 
 
 
