@@ -26,8 +26,8 @@ import time
 import copy
 from lmfit import Model, Parameters
 from numpy.lib.stride_tricks import as_strided
-
-
+import cv2
+import scipy.ndimage as ndimage
 
 from scipy import ndimage
 from tqdm import tqdm
@@ -587,6 +587,14 @@ class PostProcessor:
                     img_arr_norm[:,:,i] = img_arr[:,:,i]/np.mean(img_arr[:,:,i])
                 elif norming == 'kernel':
                     img_arr_norm[:,:,i] = ndimage.median_filter(img_arr[:,:,i], size = (3,3))
+                elif norming == 'maxmin':
+                    img_arr_norm[:,:,i] = (img_arr[:,:,i] - np.amin(img_arr[:,:,i]))/(np.amax(img_arr[:,:,i]) - np.amin(img_arr[:,:,i]))
+                elif norming == 'clahe':
+                    clahe = cv2.createCLAHE(clipLimit = 5, tileGridSize=(4, 4))
+                    img_arr_norm[:,:,i] = clahe.apply((255*(img_arr[:,:,i]/np.amax(img_arr[:,:,i]))).astype(np.uint8))
+                elif norming == 'gaussian':
+                    img_gauss = ndimage.gaussian_filter(img_arr[:,:,i], sigma=1)
+                    img_arr_norm[:,:,i] = img_gauss/np.mean(img_gauss)
         else:
                 if norming == 'max':
                     img_arr_norm = img_arr/np.amax(img_arr)
@@ -594,9 +602,17 @@ class PostProcessor:
                     img_arr_norm = img_arr/np.mean(img_arr)
                 elif norming == 'kernel':
                     img_arr_norm = ndimage.median_filter(img_arr, size = (3,3))
+                elif norming == 'maxmin':
+                    img_arr_norm = (img_arr - np.amin(img_arr))/(np.amax(img_arr) - np.amin(img_arr))
+                elif norming == 'clahe':
+                    clahe = cv2.createCLAHE(clipLimit = 5, tileGridSize=(4, 4))
+                    img_arr_norm = clahe.apply( (255*(img_arr/np.amax(img_arr))).astype(np.uint8))      
+                elif norming == 'gaussian':
+                    img_gauss = ndimage.gaussian_filter(img_arr, sigma=1)
+                    img_arr_norm = img_gauss/np.mean(img_gauss)                    
         return img_arr_norm
 
-    def L2_init(self, norming = 'max'):
+    def L2_init(self, norming = 'max', exponent = 2):
         # Normalize images
         darkfield_aligned_norm = self.normalize_L2(self.darkfield_aligned, norming)
         darkfield_aligned_averaged_norm = self.normalize_L2(np.sum(self.darkfield_aligned, axis = -1), norming)
@@ -604,11 +620,11 @@ class PostProcessor:
         # Calculate L2 norm
         self.L2_norm = []
         for i, cell in enumerate(np.moveaxis(darkfield_aligned_norm,2,0)):
-            self.L2_norm.append(np.sum(np.square(darkfield_aligned_averaged_norm-cell)))
+            self.L2_norm.append(np.sum(np.power(np.abs(darkfield_aligned_averaged_norm-cell), exponent)))
             
         return darkfield_aligned_norm
     
-    def L2_norm_process(self, n_ratio = 0.1, norming = 'max'):
+    def L2_norm_process(self, n_ratio = 0.1, norming = 'max', exponent = 2):
         # Stacks, where the slices will be thrown out
         darkfield_aligned_norm_L2 = self.normalize_L2(self.darkfield_aligned, norming)
         L2_excluded = []
@@ -631,18 +647,14 @@ class PostProcessor:
             # Calculate new L2 norm
             self.L2_norm = []
             for i, cell in enumerate(np.moveaxis(darkfield_aligned_norm_L2,2,0)):
-                self.L2_norm.append(np.sum(np.square(darkfield_aligned_averaged_norm_L2-cell)))
+                self.L2_norm.append(np.sum(np.power(np.abs(darkfield_aligned_averaged_norm_L2-cell), exponent)))
 
         self.slice_L2_excluded = L2_excluded
         
-        print(f'Number of total slices: {darkfield_aligned_norm_L2.shape[2]}')
-        print(f'Number of slices after L2-norm: {darkfield_aligned_norm_L2.shape[2]-n_abs}')
+        print(f'Number of total slices: {self.darkfield_aligned.shape[2]}')
+        print(f'Number of slices after L2-norm: {self.darkfield_aligned.shape[2]-n_abs}')
 
         # Plotting results
-
-        # Average image if new cells are removed
-        darkfield_aligned_averaged_norm_L2 = np.sum(darkfield_aligned_norm_L2, axis=2)
-        self.darkfield_aligned_averaged_norm_L2 = self.normalize_L2(darkfield_aligned_averaged_norm_L2, norming)
 
         # Compare new averaged image and the old one
         fig, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
@@ -652,7 +664,6 @@ class PostProcessor:
         for i in range(0, self.darkfield_aligned.shape[-1]):
              if not i in L2_excluded:
                 self.darkfield_plot += self.darkfield_aligned[:,:,i]
-        self.darkfield_plot /= np.mean(self.darkfield_plot)
         
         ax2.imshow(self.darkfield_plot)
         ax2.set_title('Reduced')
@@ -667,11 +678,11 @@ class PostProcessor:
     def EELS_region(self):
         
         # Generate a hyperspy-class from the average spectrum image to apply the PCA
-        self.s_averaged_orig = hs.signals.Signal1D(self.EELS_sum_aligned)
+        self.s_averaged_orig = hs.signals.Signal2D(self.EELS_sum_aligned)
         # Adjust axes
         self.s_averaged_orig.axes_manager = self.s_EELS.axes_manager
-        self.s_averaged_orig.axes_manager['x'].size = self.EELS_sum_aligned.data.shape[0]
-        self.s_averaged_orig.axes_manager['y'].size = self.EELS_sum_aligned.data.shape[1]
+        self.s_averaged_orig.axes_manager['x'].size = self.EELS_sum_aligned.data.shape[1]
+        self.s_averaged_orig.axes_manager['y'].size = self.EELS_sum_aligned.data.shape[0]
 
         # Average whole averaged spectrum image for setting signal and background range
         self.s = hs.signals.Signal1D(np.sum(self.EELS_sum_aligned,axis=(0,1)))
@@ -834,6 +845,11 @@ class L2_Selector():
         self.L2_norm = L2_norm
         self.x_points = np.linspace(0,1,self.darkfield_aligned_norm.shape[2])
         
+        # Sorting
+        L2_sorted_idx = np.argsort(self.L2_norm)
+        self.darkfield_aligned_norm = self.darkfield_aligned_norm[:,:,L2_sorted_idx]
+        self.L2_sorted = np.asarray(self.L2_norm)[L2_sorted_idx]
+        
         # Set initial index
         self.idx = 0
         # Differentiate between click and drag (for zooming)
@@ -841,9 +857,6 @@ class L2_Selector():
         
         # Plot
         self.fig, (self.ax1, self.ax2) = plt.subplots(1, 2)
-
-        # Calculate axes for L2-norm
-        self.L2_sorted = np.sort(self.L2_norm)
         
         # Plot L2-norm
         self.lineplot = self.ax1.plot(self.x_points,self.L2_sorted, linestyle='--', marker='o', color='b', zorder=0)
@@ -1406,8 +1419,8 @@ class Aligner:
                         Tx = grad_x_smooth_fit
                         Ty = grad_y_smooth_fit
                     else:
-                        Tx = 3*grad_x_smooth_fit
-                        Ty = 3*grad_y_smooth_fit
+                        Tx = 7*grad_x_smooth_fit
+                        Ty = 7*grad_y_smooth_fit
                     
                     self.transf_field_x_non[:,:,i] += Tx
                     self.transf_field_y_non[:,:,i] += Ty
@@ -1503,6 +1516,7 @@ class Selector_pca():
         self.d = d_neighbour
         self.n_back = n_back
         
+        self.s_eels = None
 
    
         # Location of saving results
@@ -1653,7 +1667,7 @@ class Selector_pca():
             self.idx += 1
         elif event.key == "a":
             # Save results PCA single background
-            Image.fromarray(self.signal_arr).save(self.path + '\\Signal_PCA_denoised_n_' + str(int(self.idx)) + '_Integrate_(' + str(np.around(roi_2.left,decimals = 2)) + '-' + str(np.around(roi_2.right,decimals = 2)) + ')_Background_(' + str(np.around(roi_1.left,decimals = 2)) + '-' + str(np.around(roi_1.right,decimals = 2)) + ')_Background_' + str(self.background) + '.tiff')
+            Image.fromarray(self.signal_arr).save(self.path + '\\Signal_PCA_denoised_n_' + str(int(self.idx)) + '_Integrate_(' + str(np.around(self.roi_2.left,decimals = 2)) + '-' + str(np.around(self.roi_2.right,decimals = 2)) + ')_Background_(' + str(np.around(self.roi_1.left,decimals = 2)) + '-' + str(np.around(self.roi_1.right,decimals = 2)) + ')_Background_' + str(self.background) + '.tiff')
             return              
 
         
@@ -1730,11 +1744,13 @@ class Selector_pca():
         if background:
             # Denoise residual
             s_pca_residual_denoised = s_raw.get_decomposition_model(int(self.idx))
+            self.s_eels = s_pca_residual_denoised.deepcopy()
             
         else:
             
             # Denoise spectra
             s_pca_background = s_raw.get_decomposition_model(int(self.idx))
+            self.s_eels = s_pca_background.deepcopy()
             # Remove PCA-denoised background from denoised data
             s_pca_residual_denoised = self.background_subtraction(self.gmodel, s_pca_background, self.roi_1, self.para_init, self.d)
 
@@ -1783,3 +1799,29 @@ class Selector_pca():
         s_sum = np.sum(s_flatten[elements,:],axis=0)/(len(elements))
 
         return s_sum
+    
+    def save_eels(self):
+        self.s_eels.data = self.s_eels.data.astype(np.float32)
+        self.s_eels.save(self.path + '\\EELS_denoised_n_' + str(self.idx) + '.rpl', encoding = 'utf8')
+        
+        
+
+def saving_notebook(path, NOTEBOOK_FULL_PATH, name_notebook = '\\Post_processing.ipynb'):
+    # Activate conda with the current environment
+    path_env = os.path.dirname(os.path.abspath(sys.executable))    
+    cmd_env = 'conda activate ' + path_env
+    subprocess.call(cmd_env, shell=True)
+
+    # Create pdf-file from the notebook
+
+    # Path and name of notebook
+    ipynb_path = os.path.dirname(os.path.realpath("__file__")) + name_notebook 
+
+    # Execute command in windows cmd
+    cmd = 'jupyter-nbconvert --to PDFviaHTML ' + ipynb_path
+    subprocess.call(cmd, shell=True)
+
+    # Shift the pdf-file to the results folder
+    source = NOTEBOOK_FULL_PATH[:-5] + 'pdf'
+    destination = path + '\\Post_Processing\\Documentation_PostProcessing.pdf'
+    os.rename(source, destination)
