@@ -73,10 +73,12 @@ class PostProcessor:
         # Load spectrum image
         self.s_EELS = hs.load(filename_EELS)
         self.s_EELS.set_signal_type("EELS")
+        print(f'Loaded SI from {filename_EELS}')
 
         # Load dark field image
         self.s_darkfield = hs.load(filename_darkfield)
         self.s_darkfield.metadata.General.name = 'dark_field_image'
+        print(f'Loaded reference image from {filename_darkfield}')
         
     # Interactive crop region selection 
     def select_crop(self):
@@ -87,7 +89,7 @@ class PostProcessor:
         s_crop.axes_manager[0].scale = self.s_EELS.axes_manager[2].scale
         s_crop.axes_manager[0].offset = self.s_EELS.axes_manager[2].offset
         # Initialize crop region
-        self.roi_crop = hs.roi.SpanROI(left=s_crop.axes_manager[0].offset, right=s_crop.axes_manager[0].offset + 50)
+        self.roi_crop = hs.roi.SpanROI(left=1.05*s_crop.axes_manager[0].offset, right= 0.95 * (s_crop.axes_manager[0].offset + s_crop.axes_manager[0].scale * s_crop.axes_manager[0].size))
 
         # Interactive plot
         s_crop.plot()
@@ -159,7 +161,7 @@ class PostProcessor:
         ax.set_ylabel('Reachability Distance') 
         ax.set_title('Reachability Plot') 
         
-    def clustering(self, eps_optics = 1):
+    def clustering(self, eps_optics = 1, cmap = 'tab10', shuffle = True):
         # Cluster spectra with given eps
         self.labels_eps = cluster_optics_dbscan(reachability=self.optics_model.reachability_,
                                            core_distances=self.optics_model.core_distances_,
@@ -183,9 +185,10 @@ class PostProcessor:
             n_samples = np.amax(labels)
 
         #Creating colors from specific color map (colormap can be changed)
-        cmap = plt.get_cmap('tab10', n_samples+1) # n_samples+1 to consider the no-cluster
+        cmap = plt.get_cmap(cmap, n_samples+1) # n_samples+1 to consider the no-cluster
         self.colors = [cmap(i) for i in np.linspace(0, 1, n_samples+1)]
-        random.shuffle(self.colors) # shuffle color for better visualization
+        if shuffle:
+            random.shuffle(self.colors) # shuffle color for better visualization
         self.colors.insert(0,[0, 0, 0, 1.0]) # add black for the no-cluster
 
         # Plotting results (coloured reachability and coloured t-SNE plot)
@@ -474,7 +477,7 @@ class PostProcessor:
         plt.title('Drift corrected dark field image')
 
 
-    def stacking(self, width, height, drift_corrected = True):
+    def stacking(self, width, height, shift_x = 0, shift_y = 0, drift_corrected = True):
         if drift_corrected:
             dark_field = self.darkfield_drift
             atom = self.atom_position_drift
@@ -493,8 +496,8 @@ class PostProcessor:
         image_dim = np.shape(dark_field)
 
         # Get pixel
-        x_px = np.round(np.array(atom)[:,0])
-        y_px = np.round(np.array(atom)[:,1])
+        x_px = np.round(np.array(atom)[:,0]) + shift_x
+        y_px = np.round(np.array(atom)[:,1]) + shift_y
 
 
         # Check if every atom can be cropped with the given width and height. If not, the atoms are excluded
@@ -785,7 +788,7 @@ class atom_selector:
             self.fig, (self.ax1, self.ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
             # Plot drift corrected clustered image
             self.ax2.matshow(self.label, cmap=self.newcmp)
-            self.scatter_atom_2 = self.ax2.scatter(self.atom_positions[:,0],self.atom_positions[:,1], c='k', edgecolors = 'r', s=14)
+            self.scatter_atom_2 = self.ax2.scatter(self.atom_positions[:,0],self.atom_positions[:,1], c='k', edgecolors = 'w', s=18)
             
         self.ax1.imshow(self.s_darkfield.data)
         self.scatter_atom = self.ax1.scatter(self.atom_positions[:,0],self.atom_positions[:,1], c='r', s=4)
