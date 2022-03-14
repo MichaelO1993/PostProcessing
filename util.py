@@ -63,9 +63,9 @@ class PostProcessor:
     def load_data(self, poisson_noise = True):
         self.poisson_noise = poisson_noise
         # Load spectrum image
-        filename_EELS = askopenfilename(title='Please select spectrum image')
+        filename_EELS = askopenfilename(title='Please select spectrum image.')
         # Load HAADF image
-        filename_darkfield = askopenfilename(title='Please load dark field image')
+        filename_darkfield = askopenfilename(title='Please select reference image.')
         
         # Path for saving results
         self.path_EELS = os.path.dirname(filename_EELS)
@@ -93,7 +93,10 @@ class PostProcessor:
 
         # Interactive plot
         s_crop.plot()
-        plt.gca().set_title('Crop spetrum (use green area)')
+        plt.gca().set_title("")
+        textstr =  'Crop spetrum (use green area)'
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
+        text = plt.gcf().text(0.5, 0.98, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props)
         self.roi_crop.interactive(s_crop, color='green')
        
     # Crop EELS data
@@ -344,11 +347,13 @@ class PostProcessor:
         self.sublattice_A.plot_planes()
 
     # Transformation matrix
-    def transform_matrix(self, slope_x, slope_y, sx, sy):
-
+    def transform_matrix(self, alpha, slope_y, sx, sy):
+        slope_x = 0
+        
+        # Matrix, which rotates the crystal, shears and scales it
         matrix = np.array([
-        [sx, sy * slope_x, 0],
-        [sx * slope_y,  sy, 0],
+        [sx*(np.cos(alpha) + slope_y*np.sin(alpha)) , sy * (slope_x*np.cos(alpha) + np.sin(alpha)), 0],
+        [sx * (-np.sin(alpha) + slope_y*np.cos(alpha)),  sy * (-slope_x*np.sin(alpha) + np.cos(alpha)), 0],
         [0,0, 1]
         ])
 
@@ -370,11 +375,11 @@ class PostProcessor:
         y_px_A = self.sublattice_A.y_position
         atom_position_a = np.transpose(np.column_stack((x_px_A,y_px_A)))
 
-        # Shear x
-        slope_x = measured_x[1]/measured_x[0] - crystal_x[1]/crystal_x[0]      
+        # Angle x-measured to x-crystal
+        alpha = -np.arccos(np.dot(measured_x/np.linalg.norm(measured_x), crystal_x/np.linalg.norm(crystal_x)))
         
         # Shear y
-        slope_y = measured_y[0]/measured_y[1] - crystal_y[0]/crystal_y[1]
+        slope_y = measured_y[0]/measured_y[1] - crystal_y[0]/crystal_y[1] + np.tan(alpha)
         
         if scaling:
             # Calculate stretch in y-vector (corrected in x-axis)
@@ -397,7 +402,7 @@ class PostProcessor:
         
         
                 # Calculate transformation matrix
-        transformation_matrix = self.transform_matrix(slope_x, slope_y, sx, sy)
+        transformation_matrix = self.transform_matrix(alpha, slope_y, sx, sy)
 
 
         # Define offset for the transformation
@@ -412,10 +417,10 @@ class PostProcessor:
                                                           cval=np.NaN, output_shape = (int(2*dark_field_image.shape[0]), 
                                                                                        int(2*dark_field_image.shape[1]), 
                                                                                        EELS_data.shape[2]), prefilter=True)
-        labels_shaped_transformed = ndimage.affine_transform(labels_shaped_3d.astype(float), transformation_matrix, offset=offset, order=3,
+        labels_shaped_transformed = ndimage.affine_transform(labels_shaped_3d.astype(float), transformation_matrix, offset=offset, order=0,
                                                              mode='constant',cval=np.NaN, 
-                                                             output_shape = (int(2*dark_field_image.shape[0]),
-                                                                             int(2*dark_field_image.shape[1]),
+                                                             output_shape = (int(2*labels_shaped_3d.shape[0]),
+                                                                             int(2*labels_shaped_3d.shape[1]),
                                                                              labels_shaped_3d.shape[2]), prefilter=True)        
 
 
@@ -443,7 +448,7 @@ class PostProcessor:
         atom_position_a = np.r_[ atom_position_a, np.ones(atom_position_a.shape[1])[np.newaxis,:] ]
 
         # Transformation matrix for points
-        transformation_matrix_pts = self.transform_matrix(-slope_x, -slope_y, 1/sy, 1/sx)
+        transformation_matrix_pts = self.transform_matrix(-alpha, -slope_y, 1/sy, 1/sx)
 
         # Use same offset as at the image trasnformation --> add it to the points
         atom_position_a = atom_position_a + np.tile(np.array([-offset[1], -offset[0], 0])[:,np.newaxis],(1,atom_position_a.shape[1]))
