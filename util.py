@@ -304,12 +304,17 @@ class PostProcessor:
         # Get atom position
         self.atom_positions = am.get_atom_positions(self.s_darkfield, separation=s_low, pca=True, subtract_background=True)
        
-    def atom_positioning_single(self, s_darkfield, atom_positions, drift_corrected = False):
+    def atom_positioning_single(self, s_darkfield, atom_positions, stacking = False):
         # Add or remove indvidual atoms - close window if you finished
-        if drift_corrected:
-            self.atom_position_drift = am.add_atoms_with_gui(s_darkfield, atom_positions,distance_threshold=self.s_low)
+        if stacking:
+            self.atom_position_stacking = am.add_atoms_with_gui(s_darkfield, atom_positions,distance_threshold=self.s_low)
         else:
             self.atom_positions = am.add_atoms_with_gui(s_darkfield, atom_positions,distance_threshold=self.s_low)
+        
+        plt.gca().set_title("")
+        textstr =  'Click to add/remove atoms. Close figure after selection!'
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
+        text = plt.gcf().text(0.5, 0.98, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props)
         
     def refine_positions(self):
         # Refine atom position by center of mass and 2d gaussians
@@ -339,23 +344,17 @@ class PostProcessor:
         self.sublattice_A.plot_planes()
 
     # Transformation matrix
-    def transform_matrix(self, rotation = 0, shear = 0, sx = 1, sy = 1, corr = False):
-
-        # correction term due to shear
-        if corr:
-            x_corr = math.cos(rotation) / math.cos(rotation + shear)
-        else:
-            x_corr = 1
+    def transform_matrix(self, slope_x, slope_y, sx, sy):
 
         matrix = np.array([
-        [x_corr * sx * math.cos(rotation + shear), -sy * math.sin(rotation), 0],
-        [x_corr * sx * math.sin(rotation + shear),  x_corr * sy * math.cos(rotation), 0],
-        [                      0,                                0, 1]
+        [sx, sy * slope_x, 0],
+        [sx * slope_y,  sy, 0],
+        [0,0, 1]
         ])
 
         return matrix
         
-    def drift_correction(self, vector_ind, crystal_x = [1,0], crystal_y = [0,1]):
+    def drift_correction(self, vector_ind, crystal_x = [1,0], crystal_y = [0,1], scaling = False):
         
         # Calculate crystal vectors
         measured_x = self.sublattice_A.zones_axis_average_distances[vector_ind[0]]
@@ -371,56 +370,53 @@ class PostProcessor:
         y_px_A = self.sublattice_A.y_position
         atom_position_a = np.transpose(np.column_stack((x_px_A,y_px_A)))
 
-
-
-
-        # Calculate angle for crystal_x to horizontal
-        theta_crystal = -np.arccos(np.dot([1,0], crystal_x)/np.linalg.norm(crystal_x))
-
-        # Calculate angle for measured_x to crystal_x
-        theta_measured = -np.arccos(np.dot(crystal_x, measured_x)/(np.linalg.norm(crystal_x)*np.linalg.norm(measured_x)))
-        rotation_angle = theta_crystal + theta_measured
-
-        # Calculate shear for measured_y to crystal_y_rot
-        shear_delta = -np.arccos(np.dot(measured_y, crystal_y)/(np.linalg.norm(measured_y)*np.linalg.norm(crystal_y)))
-        shear_angle = shear_delta - theta_measured
-
-        # Shear does not keep length?
-        transformation_vec = self.transform_matrix(rotation = 0, shear = shear_angle, sx = 1, sy = 1)
-        measured_x_shear = np.array(measured_x).dot(transformation_vec[0:2,0:2])
-        measured_y_shear = np.array(measured_y).dot(transformation_vec[0:2,0:2])
-
-        # Calculate stretch in y-vector (corrected in x-axis)
-        ratio = np.linalg.norm(crystal_y)/np.linalg.norm(crystal_x)*(np.linalg.norm(measured_x_shear)/np.linalg.norm(measured_y_shear))
-        # Only stretch smaller axis, other axis is not scaled
-        crystal_xnorm = np.linalg.norm(crystal_x)
-        crystal_ynorm = np.linalg.norm(crystal_y)
-        if ratio > 1:
-            sy = (crystal_x[0]/crystal_xnorm + crystal_y[0]/crystal_ynorm)*ratio
-            sx = 1
-        elif ratio < 1:
-            sx = (crystal_x[1]/crystal_xnorm + crystal_y[1]/crystal_ynorm)/ratio
-            sy = 1
+        # Shear x
+        slope_x = measured_x[1]/measured_x[0] - crystal_x[1]/crystal_x[0]      
+        
+        # Shear y
+        slope_y = measured_y[0]/measured_y[1] - crystal_y[0]/crystal_y[1]
+        
+        if scaling:
+            # Calculate stretch in y-vector (corrected in x-axis)
+            ratio = np.linalg.norm(crystal_y)/np.linalg.norm(crystal_x)*(np.linalg.norm(measured_x)/np.linalg.norm(measured_y))
+            # Only stretch smaller axis, other axis is not scaled
+            crystal_xnorm = np.linalg.norm(crystal_x)
+            crystal_ynorm = np.linalg.norm(crystal_y)
+            if ratio > 1:
+                sy = (crystal_x[0]/crystal_xnorm + crystal_y[0]/crystal_ynorm)*ratio
+                sx = 1
+            elif ratio < 1:
+                sx = (crystal_x[1]/crystal_xnorm + crystal_y[1]/crystal_ynorm)/ratio
+                sy = 1
+            else:
+                sx = 1
+                sy = 1
         else:
             sx = 1
             sy = 1
+        
+        
+                # Calculate transformation matrix
+        transformation_matrix = self.transform_matrix(slope_x, slope_y, sx, sy)
 
-        # Calculate transformation matrix
-        transformation_matrix = self.transform_matrix(rotation_angle, shear_angle, sx, sy, corr = False)
-
-        # Calculate dimension of the new image
-        a = np.ceil(np.matmul(transformation_matrix.T[0:2,0:2],np.array((dark_field_image.shape[0],0)))).astype(np.int32)
-        b = np.ceil(np.matmul(transformation_matrix.T[0:2,0:2],np.array((0,dark_field_image.shape[1])))).astype(np.int32)
-        c = np.abs(a) + np.abs(b)
-        dim_new = np.array((c[0], c[1], dark_field_image.shape[2]))
 
         # Define offset for the transformation
-        offset = (0.5*dark_field_image.shape[0], 0.5*dark_field_image.shape[1], dark_field_image.shape[2]) - dim_new.dot(transformation_matrix.T)
+        offset = (-int(dark_field_image.shape[0]/2), -int(dark_field_image.shape[1]/2), 0)
 
         # Transform images
-        dark_field_image_trans = ndimage.affine_transform(dark_field_image, transformation_matrix, offset=offset, output_shape=(int(2*dim_new[0]),int(2*dim_new[1]),dim_new[2]), output=None, order=3, mode='constant', cval=np.NaN, prefilter=True)
-        EELS_data = ndimage.affine_transform(EELS_data, transformation_matrix, offset=offset, output_shape=(int(2*dim_new[0]),int(2*dim_new[1]),EELS_data.shape[2]), output=None, order=3, mode='constant', cval=np.NaN, prefilter=True)
-        labels_shaped_transformed = ndimage.affine_transform(labels_shaped_3d.astype(float), transformation_matrix, offset=offset, output_shape=(int(2*dim_new[0]),int(2*dim_new[1]),labels_shaped_3d.shape[2]), output=None, order=0, mode='constant', cval=np.NaN, prefilter=True)
+        dark_field_image_trans = ndimage.affine_transform(dark_field_image, transformation_matrix, offset=offset, order=3, mode='constant',
+                                                          cval=np.NaN, output_shape = (int(2*dark_field_image.shape[0]), 
+                                                                                       int(2*dark_field_image.shape[1]), 
+                                                                                       dark_field_image.shape[2]), prefilter=True)
+        EELS_data = ndimage.affine_transform(EELS_data, transformation_matrix, offset=offset, order=3, mode='constant',
+                                                          cval=np.NaN, output_shape = (int(2*dark_field_image.shape[0]), 
+                                                                                       int(2*dark_field_image.shape[1]), 
+                                                                                       EELS_data.shape[2]), prefilter=True)
+        labels_shaped_transformed = ndimage.affine_transform(labels_shaped_3d.astype(float), transformation_matrix, offset=offset, order=3,
+                                                             mode='constant',cval=np.NaN, 
+                                                             output_shape = (int(2*dark_field_image.shape[0]),
+                                                                             int(2*dark_field_image.shape[1]),
+                                                                             labels_shaped_3d.shape[2]), prefilter=True)        
 
 
         # Identify the translation required for the atom positions
@@ -447,7 +443,7 @@ class PostProcessor:
         atom_position_a = np.r_[ atom_position_a, np.ones(atom_position_a.shape[1])[np.newaxis,:] ]
 
         # Transformation matrix for points
-        transformation_matrix_pts = self.transform_matrix(-rotation_angle, -shear_angle, 1/sy, 1/sx, corr = True)
+        transformation_matrix_pts = self.transform_matrix(-slope_x, -slope_y, 1/sy, 1/sx)
 
         # Use same offset as at the image trasnformation --> add it to the points
         atom_position_a = atom_position_a + np.tile(np.array([-offset[1], -offset[0], 0])[:,np.newaxis],(1,atom_position_a.shape[1]))
@@ -459,7 +455,8 @@ class PostProcessor:
         atom_position_a_transformed = atom_position_a_transformed[0:2,:]
 
         # Remove same margin as at the image
-        atom_position_a_transformed = atom_position_a_transformed - np.tile(np.array([k_x, k_y])[:,np.newaxis],(1,atom_position_a_transformed.shape[1]))
+        atom_position_a_transformed = atom_position_a_transformed - np.tile(np.array([k_x, k_y])[:,np.newaxis],
+                                                                            (1,atom_position_a_transformed.shape[1]))
         atom_position_a_transformed = np.swapaxes(atom_position_a_transformed,0,1)
 
         dark_field_image = dark_field_image[:,:,0]
@@ -476,18 +473,23 @@ class PostProcessor:
         plt.scatter(atom_position_a_transformed[:,0],atom_position_a_transformed[:,1], c='r', s=4)
         plt.title('Drift corrected dark field image')
 
-
-    def stacking(self, width, height, shift_x = 0, shift_y = 0, drift_corrected = True):
-        if drift_corrected:
-            dark_field = self.darkfield_drift
-            atom = self.atom_position_drift
-            labels = self.labels_shaped_drift
-            self.EELS = self.EELS_data_drift
+    def drift_on_off(self, drift_corr = True):
+        if drift_corr:
+            self.darkfield_stacking = self.darkfield_drift
+            self.atom_position_stacking = np.array(self.atom_position_drift)
+            self.labels_shaped_stacking = self.labels_shaped_drift
+            self.EELS_data_stacking = self.EELS_data_drift
         else:
-            dark_field = self.s_darkfield.data
-            atom = self.atom_positions
-            labels = self.labels_shaped
-            self.EELS = self.s_EELS.data
+            self.darkfield_stacking = self.s_darkfield.data
+            self.atom_position_stacking = np.array(self.atom_positions)
+            self.labels_shaped_stacking = self.labels_shaped
+            self.EELS_data_stacking = self.s_EELS.data            
+
+    def stacking(self, width, height, shift_x = 0, shift_y = 0):
+        dark_field = self.darkfield_stacking
+        atom = self.atom_position_stacking
+        labels = self.labels_shaped_stacking
+        self.EELS = self.EELS_data_stacking
         
         # Shuffle the stacks (better alignment with SmartAlign)
         shuffle = 1 
@@ -656,7 +658,6 @@ class PostProcessor:
 
         # Compare new averaged image and the old one
         fig, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
-        fig.suptitle('Comparison darkfield images')
         
         self.darkfield_plot = np.zeros(self.darkfield_aligned.shape[0:2])
         for i in range(0, self.darkfield_aligned.shape[-1]):
@@ -699,9 +700,15 @@ class PostProcessor:
         # Select background for removal and signal for integration
         self.s.plot()
 
-        print('blue: Background')
-        print('green: Signal')
+        plt.gca().set_title("")
+        textstr_blue =  'Background'
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.1)
+        text = plt.gcf().text(0.33, 1.02, textstr_blue, fontsize=12, horizontalalignment='center', verticalalignment='bottom', color = 'blue', bbox=props, transform=plt.gca().transAxes)
 
+        textstr_green =  'Signal'
+        props = dict(boxstyle='round', facecolor='lightgreen', alpha=0.1)
+        text = plt.gcf().text(0.66, 1.02, textstr_green, fontsize=12, horizontalalignment='center', verticalalignment='bottom', color = 'green', bbox=props, transform=plt.gca().transAxes)
+        
         # Get values for the background and signal
         self.roi_background.interactive(self.s, color='blue')
         self.roi_signal.interactive(self.s, color='green')
@@ -755,7 +762,10 @@ class PostProcessor:
         ax.fill_between(x_axes_signal,self.s.isig[self.roi_signal].data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1])-self.gmodel.eval(self.result_fit.params, x=x_axes_signal), alpha = 0.3, facecolor = 'green')
         ax.plot([np.amin(x_axes), np.amax(x_axes)],[0, 0],'k--')
         ax.plot(x_axes_background,self.result_fit.init_fit,'r--', label = 'Initial guess')
-        ax.legend()
+        
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+        ax.legend(bbox_to_anchor=(1,1), loc="upper left")
         ax.set_xlabel('Energy loss / eV')
         ax.set_ylabel('Intensity / a.u.')
 
@@ -792,10 +802,10 @@ class atom_selector:
             
         self.ax1.imshow(self.s_darkfield.data)
         self.scatter_atom = self.ax1.scatter(self.atom_positions[:,0],self.atom_positions[:,1], c='r', s=4)
-        self.ax1.set_title(
-            "Click and drag to draw a rectangle.\n"
-            "Press 'd' to remove atoms. "
-            "Press 't' to toggle the selector on and off.")
+        
+        textstr =  'Click and drag to draw a rectangle.\nPress "d" to remove atoms.\nPress "t" to toggle the selector on and off.'
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
+        text = self.ax1.text(0.5, 1.02, textstr, fontsize=8, horizontalalignment='center', verticalalignment='bottom', bbox=props, transform=self.ax1.transAxes)
         
 
         # drawtype is 'box' or 'line' or 'none'
@@ -860,8 +870,12 @@ class L2_Selector():
         self.lineplot = self.ax1.plot(self.x_points,self.L2_sorted, linestyle='--', marker='o', color='b', zorder=0)
         self.scatter_2, = self.ax1.plot(self.x_points[self.idx],self.L2_sorted[self.idx] , marker='o', color='r')
         
+        textstr =  'Click to show specific cell.\nPress "w" or "e" for plus/muinus.'
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
+        text = self.ax1.text(0.5, 1.02, textstr, fontsize=8, horizontalalignment='center', verticalalignment='bottom', bbox=props, transform=self.ax1.transAxes)
+        
+        
         # Set titles
-        self.ax1.set_title("Click to show specific cell. \n Press 'w' or 'e' for plus/minus.")
         self.ax2.set_title('Cell:' + str(self.idx + 1))
 
         # Plot cells (initialize with first cell)
@@ -1526,16 +1540,8 @@ class Selector_pca():
             # Save dark field image
             Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path, 'Darkfield_Averaged.tiff'))
 
-
-        else:
-            answer = input('Result already exist! Overwrite files? [y/n]')
-            if not answer.lower() in ['y','yes']:
-                print('Saving results aborted by user due to existing results!')
-            else:
-                # Save dark field image
-                Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path, 'Darkfield_Averaged.tiff'))
-
-
+        # Save dark field image
+        Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path, 'Darkfield_Averaged.tiff'))
 
         # Initial index
         self.idx = 1
@@ -1561,14 +1567,7 @@ class Selector_pca():
         self.ax3.set_xticklabels([])
         self.ax3.set_yticklabels([])
         self.ax4.set_xticklabels([])
-        self.ax4.set_yticklabels([])
-        
-        # Set titles
-        self.ax1.set_title("Click to change components. \n Press 'w' or 'e' for plus/minus. \n 'a' for saving.")
-        self.ax2.set_title('Darkfield image')
-        self.ax3.set_title('EELS map avg')
-        self.ax4.set_title('Number of components:' + str(self.idx))
-        
+        self.ax4.set_yticklabels([])      
         
         ## Plot ax2
         
@@ -1624,15 +1623,29 @@ class Selector_pca():
         self.x_scree = np.arange(1,len(self.variance_pca)+1)
         
         # Plot scree plot
-        self.lineplot = self.ax1.plot(self.x_scree,self.variance_pca, marker='o', color='b', zorder=0)
+        self.lineplot = self.ax1.plot(self.x_scree[1:],self.variance_pca[1:], marker='o', color='b', zorder=0)
         self.scatter_2, = self.ax1.plot(self.x_scree[self.idx], self.variance_pca[self.idx] , marker='o', color='r')
         self.ax1.set_yscale('log')
      
+    
+        # Set titles
+        textstr =  'Click to change components. \n Press "w" or "e" for plus/minus.'
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
+        text = self.ax1.text(0.5, 1.02, textstr, fontsize=8, horizontalalignment='center', verticalalignment='bottom', bbox=props, transform=self.ax1.transAxes)
+        
+        self.ax2.set_title('Darkfield image')
+        self.ax3.set_title('EELS map avg')
+        self.ax4.set_title('Number of components:' + str(self.idx))
+        textstr =  'Press "a" to save image'
+        text = self.ax4.text(0.5, -0.02, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props, transform=self.ax4.transAxes)  
+    
         
         # mpl_connect (press & release to distinguish between clicking and dragging)
         self.cid1 = self.ax1.figure.canvas.mpl_connect("button_press_event",self.select_change_press)
         self.cid2 = self.ax1.figure.canvas.mpl_connect("button_release_event",self.select_change_release)
         self.cid3 = self.ax1.figure.canvas.mpl_connect("key_press_event",self.select_change_key)
+        
+      
         
     def select_change_press(self, event):
         # Start timer
