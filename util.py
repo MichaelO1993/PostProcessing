@@ -1542,11 +1542,14 @@ class Selector_pca():
          # If folder is already present, ask to overwrite files
         if not os.path.exists(self.path):          
             os.mkdir(self.path)
-            # Save dark field image
-            Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path, 'Darkfield_Averaged.tiff'))
-
         # Save dark field image
         Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path, 'Darkfield_Averaged.tiff'))
+            
+        # Location of saving results in subfolder
+        self.path = os.path.join(self.path, f'Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}')
+        
+        if not os.path.exists(self.path):          
+            os.mkdir(self.path)
 
         # Initial index
         self.idx = 1
@@ -1588,7 +1591,9 @@ class Selector_pca():
         self.s_avg_residual_integrated_norm =self.normalize(self.s_avg_residual_integrated)
         
         # Save
-        Image.fromarray(self.s_avg_residual_integrated_norm).save(self.path + '\\Signal_Averaged_Integrate_(' + str(np.around(self.roi_2.left,decimals = 2)) + '-' + str(np.around(self.roi_2.right,decimals = 2)) + ')_Background_(' + str(np.around(self.roi_1.left,decimals = 2)) + '-' + str(np.around(self.roi_1.right,decimals = 2)) + ')_Background_' + str(self.background) + '.tiff')    
+        Image.fromarray(self.s_avg_residual_integrated_norm).save(
+            f'{self.path}\\Signal_Averaged_Integrate_{self.idx}_Integrate_({self.roi_2.left:.2f}{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}.tiff')
+
 
         # Plot averaged EELS map
         self.ax3.imshow(self.s_avg_residual_integrated_norm) 
@@ -1683,7 +1688,9 @@ class Selector_pca():
             self.idx += 1
         elif event.key == "a":
             # Save results PCA single background
-            Image.fromarray(self.signal_arr).save(self.path + '\\Signal_PCA_denoised_n_' + str(int(self.idx)) + '_Integrate_(' + str(np.around(self.roi_2.left,decimals = 2)) + '-' + str(np.around(self.roi_2.right,decimals = 2)) + ')_Background_(' + str(np.around(self.roi_1.left,decimals = 2)) + '-' + str(np.around(self.roi_1.right,decimals = 2)) + ')_Background_' + str(self.background) + '.tiff')
+            
+            Image.fromarray(self.signal_arr).save(f'{self.path}\\Signal_PCA_denoised_n_{self.idx}_Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}.tiff')
+
             return              
 
         
