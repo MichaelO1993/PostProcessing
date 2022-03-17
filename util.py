@@ -1537,16 +1537,16 @@ class Selector_pca():
 
    
         # Location of saving results
-        self.path = os.path.join(self.path_EELS, 'Post_Processing')
+        self.path_post = os.path.join(self.path_EELS, 'Post_Processing')
 
          # If folder is already present, ask to overwrite files
-        if not os.path.exists(self.path):          
-            os.mkdir(self.path)
+        if not os.path.exists(self.path_post):          
+            os.mkdir(self.path_post)
         # Save dark field image
-        Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path, 'Darkfield_Averaged.tiff'))
+        Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path_post, 'Darkfield_Averaged.tiff'))
             
         # Location of saving results in subfolder
-        self.path = os.path.join(self.path, f'Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}')
+        self.path = os.path.join(self.path_post, f'Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}')
         
         if not os.path.exists(self.path):          
             os.mkdir(self.path)
@@ -1688,8 +1688,10 @@ class Selector_pca():
             self.idx += 1
         elif event.key == "a":
             # Save results PCA single background
+            path = os.path.join(self.path,f'Signal_PCA_denoised_n_{self.idx}_Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}.tiff')
             
-            Image.fromarray(self.signal_arr).save(f'{self.path}\\Signal_PCA_denoised_n_{self.idx}_Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}.tiff')
+            Image.fromarray(self.signal_arr).save(path)
+            print(f'Image saved: {path}')
 
             return              
 
@@ -1762,17 +1764,19 @@ class Selector_pca():
 
         return s_residuals
 
-    def pca_denoise(self, s_raw, background):
+    def pca_denoise(self, s_raw, background, n = None):
+        if n == None:
+            n = self.idx
         
         if background:
             # Denoise residual
-            s_pca_residual_denoised = s_raw.get_decomposition_model(int(self.idx))
+            s_pca_residual_denoised = s_raw.get_decomposition_model(int(n))
             self.s_eels = s_pca_residual_denoised.deepcopy()
             
         else:
             
             # Denoise spectra
-            s_pca_background = s_raw.get_decomposition_model(int(self.idx))
+            s_pca_background = s_raw.get_decomposition_model(int(n))
             self.s_eels = s_pca_background.deepcopy()
             # Remove PCA-denoised background from denoised data
             s_pca_residual_denoised = self.background_subtraction(self.gmodel, s_pca_background, self.roi_1, self.para_init, self.d)
@@ -1823,10 +1827,22 @@ class Selector_pca():
 
         return s_sum
     
-    def save_eels(self):
-        self.s_eels.data = self.s_eels.data.astype(np.float32)
-        self.s_eels.save(self.path + '\\EELS_denoised_n_' + str(self.idx) + '.rpl', encoding = 'utf8')
-        
+    def save_eels(self, pca_denoised = True, n = None):
+        if n == None:
+            n = self.idx
+            
+        if pca_denoised:
+            s_arr_save = self.pca_denoise(self.s_pca_residual, self.background, n)
+            s_pca_denoise_save = self.s_averaged.copy()
+            s_pca_denoise_save.data = s_arr_save.astype(np.float32)
+            path = os.path.join(self.path_post, f'EELS_denoised_n_{n}.rpl')
+            self.s_eels.save(path, encoding = 'utf8')
+            print(f'PCA-denoised spectrum image saved: {path}')
+        else:
+            self.s_averaged.data = self.s_averaged.data.astype(np.float32)
+            path = os.path.join(self.path_post, f'EELS_averaged.rpl')
+            self.s_averaged.save(path, encoding = 'utf8')     
+            print(f'Averaged spectrum image saved: {path}')
         
 
 def saving_notebook(path, NOTEBOOK_FULL_PATH, name_notebook = '\\Post_processing.ipynb'):
