@@ -1546,7 +1546,7 @@ class Selector_pca():
         Image.fromarray(self.darkfield_aligned_averaged_norm ).save(os.path.join(self.path_post, 'Darkfield_Averaged.tiff'))
             
         # Location of saving results in subfolder
-        self.path = os.path.join(self.path_post, f'Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}')
+        self.path = os.path.join(self.path_post, f'Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})')
         
         if not os.path.exists(self.path):          
             os.mkdir(self.path)
@@ -1592,7 +1592,7 @@ class Selector_pca():
         
         # Save
         Image.fromarray(self.s_avg_residual_integrated_norm).save(
-            f'{self.path}\\Signal_Averaged_Integrate_{self.idx}_Integrate_({self.roi_2.left:.2f}{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}.tiff')
+            os.path.join(self.path, f'Signal_Averaged_Integrate_{self.idx}_Integrate_({self.roi_2.left:.2f}{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f}).tiff'))
 
 
         # Plot averaged EELS map
@@ -1688,7 +1688,7 @@ class Selector_pca():
             self.idx += 1
         elif event.key == "a":
             # Save results PCA single background
-            path = os.path.join(self.path,f'Signal_PCA_denoised_n_{self.idx}_Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f})_prior_background_sub_{self.background}.tiff')
+            path = os.path.join(self.path,f'Signal_PCA_denoised_n_{self.idx}_Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f}).tiff')
             
             Image.fromarray(self.signal_arr).save(path)
             print(f'Image saved: {path}')
