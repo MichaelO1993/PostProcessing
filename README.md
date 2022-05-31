@@ -14,4 +14,9 @@ As an example the fine structure mapping of LAO-Anatase interface is shown.
 |:--:| 
 | *Post-Processing Path* |
 
+
+Saved spectrum images (rpl-files) can be imported in GMS with following pluging:
+
+https://github.com/hyperspy/ImportRPL
+
 If you use this script please cite:

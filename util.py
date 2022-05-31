@@ -27,7 +27,7 @@ from numpy.lib.stride_tricks import as_strided
 import cv2
 import scipy.ndimage as ndimage
 from scipy.fft import fftn, ifftn, fftfreq
-
+from kneed import KneeLocator
 
 class PostProcessor:
     def __init__(self):
@@ -73,21 +73,86 @@ class PostProcessor:
         # Load spectrum image
         self.s_EELS = hs.load(filename_EELS)
         self.s_EELS.set_signal_type("EELS")
+        self.s_EELS_shifted = self.s_EELS.deepcopy()
         print(f'Loaded SI from {filename_EELS}')
 
         # Load dark field image
         self.s_darkfield = hs.load(filename_darkfield)
         self.s_darkfield.metadata.General.name = 'dark_field_image'
         print(f'Loaded reference image from {filename_darkfield}')
-        
+###########################
+    def align_spectra_init(self, n_plot = 60):        
+        # Decompose
+        self.s_EELS = self.decompose_hs(self.s_EELS)
+
+        # Plot scree plot
+        ax = self.s_EELS.plot_explained_variance_ratio(n=n_plot,vline=False)
+        ax.set_title('Scree Plot')
+
+        s = hs.signals.Signal1D(np.sum(self.s_EELS,axis=(0,1)))
+        # Adjust axes
+        s.axes_manager[0].name = self.s_EELS.axes_manager[2].name
+        s.axes_manager[0].scale = self.s_EELS.axes_manager[2].scale
+        s.axes_manager[0].offset = self.s_EELS.axes_manager[2].offset
+        s.axes_manager[0].size = self.s_EELS.axes_manager[2].size
+
+        self.roi_align = hs.roi.SpanROI(left=s.axes_manager[0].offset, right=s.axes_manager[0].offset + s.axes_manager[0].scale*s.axes_manager[0].size/4)
+
+        ax2 = s.plot()
+        plt.gca().set_title("")
+        textstr =  'Select feature for aligning'
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
+        text = plt.gcf().text(0.5, 0.98, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props)
+        self.roi_align.interactive(s, color='blue')
+
+    def align_spectra_calc(self, n=70, vmin = -0.5, vmax = 0.5):
+        self.n_align = n
+        s_denoised = self.s_EELS.get_decomposition_model(int(n))
+
+        shifts = s_denoised.estimate_shift1D(start = self.roi_align.left, 
+                   end = self.roi_align.right, 
+                   interpolate=True, number_of_interpolation_points=5)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, sharey = True, sharex = True)
+        ax1.imshow(self.s_darkfield.data)
+        ax1.axis('off')
+        ax1.set_title('Reference image')
+
+        ax2.imshow(shifts, vmin = vmin, vmax = vmax)
+        ax2.axis('off')
+        ax2.set_title('Spectra Shift')
+
+    def align_spectra_apply(self, max_shift = 0.5):
+        self.s_EELS_shifted = self.s_EELS.deepcopy()
+        s_denoised = self.s_EELS.get_decomposition_model(int(self.n_align))
+
+        s_denoised.align1D(start = self.roi_align.left, 
+               end = self.roi_align.right, 
+               max_shift=max_shift, 
+               interpolate=True, number_of_interpolation_points=5, interpolation_method='linear', 
+               crop=True,
+               also_align = [self.s_EELS_shifted])
+
+        x_raw = np.arange(self.s_EELS.axes_manager[-1].offset, self.s_EELS.axes_manager[-1].offset + self.s_EELS.axes_manager[-1].scale*self.s_EELS.axes_manager[-1].size, self.s_EELS.axes_manager[-1].scale)
+        x_aligned = np.arange(self.s_EELS_shifted.axes_manager[-1].offset, self.s_EELS_shifted.axes_manager[-1].offset + self.s_EELS_shifted.axes_manager[-1].scale*self.s_EELS_shifted.axes_manager[-1].size, self.s_EELS_shifted.axes_manager[-1].scale)
+
+        fig, ax1 = plt.subplots()
+        ax1.plot(x_raw, self.s_EELS.sum(), label = 'raw')
+        ax1.plot(x_aligned, self.s_EELS_shifted.sum(), label = 'aligned')
+        ax1.set_title('Aligning process')
+        ax1.legend()
+            
+            
+            
+############################
     # Interactive crop region selection 
     def select_crop(self):
         # Average spectra --> new EELS-set
-        s_crop = hs.signals.Signal1D(np.sum(self.s_EELS.data,axis=(0,1)))
+        s_crop = hs.signals.Signal1D(np.sum(self.s_EELS_shifted.data,axis=(0,1)))
         # Define axes manager
-        s_crop.axes_manager[0].name = self.s_EELS.axes_manager[2].name
-        s_crop.axes_manager[0].scale = self.s_EELS.axes_manager[2].scale
-        s_crop.axes_manager[0].offset = self.s_EELS.axes_manager[2].offset
+        s_crop.axes_manager[0].name = self.s_EELS_shifted.axes_manager[2].name
+        s_crop.axes_manager[0].scale = self.s_EELS_shifted.axes_manager[2].scale
+        s_crop.axes_manager[0].offset = self.s_EELS_shifted.axes_manager[2].offset
         # Initialize crop region
         self.roi_crop = hs.roi.SpanROI(left=1.05*s_crop.axes_manager[0].offset, right= 0.95 * (s_crop.axes_manager[0].offset + s_crop.axes_manager[0].scale * s_crop.axes_manager[0].size))
 
@@ -108,14 +173,14 @@ class PostProcessor:
             left_value = np.amin(roi_crop_in)
             right_value = np.amax(roi_crop_in)
         # Crop EELS data
-        self.s_EELS.crop(2,start = left_value, end = right_value)
+        self.s_EELS_shifted.crop(2,start = left_value, end = right_value)
         print(f'Crop Region from {left_value:.2f} eV to {right_value:.2f} eV')
      
     def decompose_hs(self, EELS):
         # for poisson no negative values allowed
         if self.poisson_noise:
             EELS.data[EELS.data < 0] = 0
-            #EELS -= np.amin(s_EELS.data) # shift upwards
+            #EELS -= np.amin(s_EELS_shifted.data) # shift upwards
             
         # Decompose spectra
         EELS.decomposition(normalize_poissonian_noise=self.poisson_noise)
@@ -124,17 +189,17 @@ class PostProcessor:
         
     def cluster_pca(self, n_plot = 60):
         # Decompose
-        self.s_EELS = self.decompose_hs(self.s_EELS)
+        self.s_EELS_shifted = self.decompose_hs(self.s_EELS_shifted)
         
         # Plot scree plot
-        ax = self.s_EELS.plot_explained_variance_ratio(n=n_plot,vline=False)
+        ax = self.s_EELS_shifted.plot_explained_variance_ratio(n=n_plot,vline=False)
         ax.set_title('Scree Plot')
         
     def clustering_init(self, n_denoise_cluster = 10, perplexity_tsne = 30):
         self.n_denoise_cluster = n_denoise_cluster
     
         # Extracting the factor-matrix from the hyperspy framework for further clustering
-        factor_matrix = self.s_EELS.get_decomposition_loadings()
+        factor_matrix = self.s_EELS_shifted.get_decomposition_loadings()
 
         # Select only factors, which are used for reconstruction
         factor_tsne = factor_matrix.data[0:self.n_denoise_cluster+1,:,:] 
@@ -221,7 +286,7 @@ class PostProcessor:
         # Plot coloured map with corresponding color of the clustering
         
         # Reshape labels to image shape
-        self.labels_shaped = np.reshape(self.labels_eps, (self.s_EELS.data.shape[0], self.s_EELS.data.shape[1]))
+        self.labels_shaped = np.reshape(self.labels_eps, (self.s_EELS_shifted.data.shape[0], self.s_EELS_shifted.data.shape[1]))
         
         # Create new colormap to match the color from before
         self.newcmp = ListedColormap(self.colors)
@@ -241,12 +306,12 @@ class PostProcessor:
         
     def clustering_spectra(self, k_min = 500):
         # Average over all pixels from the denoised SI by PCA
-        sc = self.s_EELS.get_decomposition_model(self.n_denoise_cluster)
+        sc = self.s_EELS_shifted.get_decomposition_model(self.n_denoise_cluster)
         sc_averaged = np.mean(sc.data,axis=(0,1))
         sc_averaged = sc_averaged[:,np.newaxis]
 
         # Average over all pixels from the original SI
-        s_averaged = np.mean(self.s_EELS.data,axis=(0,1))
+        s_averaged = np.mean(self.s_EELS_shifted.data,axis=(0,1))
         s_averaged = s_averaged[:,np.newaxis]
 
         # First element is the over all averaged spectra in black
@@ -270,7 +335,7 @@ class PostProcessor:
                 sc_averaged = np.append(sc_averaged,a,axis=1)
 
                 # Average all spectra with the same label (original)
-                s_vec = np.reshape(self.s_EELS.data, ( self.labels_eps.shape[0], self.s_EELS.data.shape[2]))
+                s_vec = np.reshape(self.s_EELS_shifted.data, ( self.labels_eps.shape[0], self.s_EELS_shifted.data.shape[2]))
                 a = np.mean(s_vec[self.labels_eps == label_unique],axis=0)
                 a = a[:,np.newaxis]
                 s_averaged = np.append(s_averaged,a,axis=1)
@@ -278,7 +343,7 @@ class PostProcessor:
         print(f'Number of clusters for plotting: {(sc_averaged.shape[1]-1)}')
         
         # Extract the energy axes for a correct x-axes
-        energy_axes = np.linspace(self.s_EELS.axes_manager["Energy loss"].offset,self.s_EELS.axes_manager["Energy loss"].offset+self.s_EELS.axes_manager["Energy loss"].scale*self.s_EELS.axes_manager["Energy loss"].size,self.s_EELS.axes_manager["Energy loss"].size)
+        energy_axes = np.linspace(self.s_EELS_shifted.axes_manager["Energy loss"].offset,self.s_EELS_shifted.axes_manager["Energy loss"].offset+self.s_EELS_shifted.axes_manager["Energy loss"].scale*self.s_EELS_shifted.axes_manager["Energy loss"].size,self.s_EELS_shifted.axes_manager["Energy loss"].size)
 
         # Plotting averaged spectra (black in the spectra)
         fig, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
@@ -367,7 +432,7 @@ class PostProcessor:
 
         # Get dark field image and spectrum image as numpy array
         dark_field_image = self.s_darkfield.data[:,:,np.newaxis]
-        EELS_data = self.s_EELS.data
+        EELS_data = self.s_EELS_shifted.data
         labels_shaped_3d = self.labels_shaped[:,:,np.newaxis]
 
         # Transform atom position from atomap
@@ -376,7 +441,7 @@ class PostProcessor:
         atom_position_a = np.transpose(np.column_stack((x_px_A,y_px_A)))
 
         # Angle x-measured to x-crystal
-        alpha = -np.arccos(np.dot(measured_x/np.linalg.norm(measured_x), crystal_x/np.linalg.norm(crystal_x)))
+        alpha = np.arccos(np.dot(measured_x/np.linalg.norm(measured_x), crystal_x/np.linalg.norm(crystal_x)))
         
         # Shear y
         slope_y = measured_y[0]/measured_y[1] - crystal_y[0]/crystal_y[1] + np.tan(alpha)
@@ -488,7 +553,7 @@ class PostProcessor:
             self.darkfield_stacking = self.s_darkfield.data
             self.atom_position_stacking = np.array(self.atom_positions)
             self.labels_shaped_stacking = self.labels_shaped
-            self.EELS_data_stacking = self.s_EELS.data            
+            self.EELS_data_stacking = self.s_EELS_shifted.data            
 
     def stacking(self, width, height, shift_x = 0, shift_y = 0):
         dark_field = self.darkfield_stacking
@@ -629,7 +694,17 @@ class PostProcessor:
             
         return darkfield_aligned_norm
     
-    def L2_norm_process(self, n_ratio = 0.1, norming = 'max', exponent = 2):
+    def L2_norm_process(self, n_ratio = None, norming = 'max', exponent = 2):
+        # If no ratio is given, take knee value
+        if n_ratio is None:
+            x_points = np.linspace(0,1,self.darkfield_aligned.shape[2])
+            L2_sorted_idx = np.argsort(self.L2_norm)
+            L2_sorted = np.asarray(self.L2_norm)[L2_sorted_idx]
+            n_ratio = KneeLocator(x_points, L2_sorted, curve="convex", direction="increasing").knee
+            if n_ratio is None:
+                print('Knee could not be found. Please enter value for n_ratio!')
+                return
+        
         # Stacks, where the slices will be thrown out
         darkfield_aligned_norm_L2 = self.normalize_L2(self.darkfield_aligned, norming)
         L2_excluded = []
@@ -684,7 +759,7 @@ class PostProcessor:
         # Generate a hyperspy-class from the average spectrum image to apply the PCA
         self.s_averaged_orig = hs.signals.Signal2D(self.EELS_sum_aligned)
         # Adjust axes
-        self.s_averaged_orig.axes_manager = self.s_EELS.axes_manager
+        self.s_averaged_orig.axes_manager = self.s_EELS_shifted.axes_manager
         self.s_averaged_orig.axes_manager['x'].size = self.EELS_sum_aligned.data.shape[1]
         self.s_averaged_orig.axes_manager['y'].size = self.EELS_sum_aligned.data.shape[0]
 
@@ -724,7 +799,7 @@ class PostProcessor:
     def exponential(self, x, A, r):
         return A * np.exp(-r*x)    
     
-    def EELS_background(self, background_fun = 'Powerlaw'):
+    def EELS_background(self, background_fun = 'Powerlaw', signal_plot = False):
 
         # Define initial parameters and creating the fitting model, depending on the function
         if background_fun == 'Powerlaw':
@@ -761,12 +836,14 @@ class PostProcessor:
 
         # Plot signal and fitted background
         figure, ax = plt.subplots(1, 1)
-        ax.plot(x_axes,self.s.data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1]), label = 'EELS')
-        ax.plot(x_axes,self.gmodel.eval(self.result_fit.params, x=x_axes), label = 'Background')
-        ax.plot(x_axes,self.s.data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1])-self.gmodel.eval(self.result_fit.params, x=x_axes), label = 'Residual')
+        if not signal_plot:
+            ax.plot(x_axes,self.s.data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1]), label = 'EELS')
+            ax.plot(x_axes,self.gmodel.eval(self.result_fit.params, x=x_axes), label = 'Background')
+            ax.plot(x_axes_background,self.result_fit.init_fit,'r--', label = 'Initial guess')
+        ax.plot(x_axes,self.s.data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1])-self.gmodel.eval(self.result_fit.params, x=x_axes), label = 'Residual', color = 'green')   
         ax.fill_between(x_axes_signal,self.s.isig[self.roi_signal].data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1])-self.gmodel.eval(self.result_fit.params, x=x_axes_signal), alpha = 0.3, facecolor = 'green')
         ax.plot([np.amin(x_axes), np.amax(x_axes)],[0, 0],'k--')
-        ax.plot(x_axes_background,self.result_fit.init_fit,'r--', label = 'Initial guess')
+        
         
         box = ax.get_position()
         ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
@@ -863,6 +940,13 @@ class L2_Selector():
         self.darkfield_aligned_norm = self.darkfield_aligned_norm[:,:,L2_sorted_idx]
         self.L2_sorted = np.asarray(self.L2_norm)[L2_sorted_idx]
         
+        # Detect knee
+        kl = KneeLocator(self.x_points, self.L2_sorted, curve="convex", direction="increasing")
+        if kl.knee is None:
+            print('Knee could not be found!')
+        else:
+            print(f'Knee found at {kl.knee:.2f}.')
+        print
         # Set initial index
         self.idx = 0
         # Differentiate between click and drag (for zooming)
@@ -874,6 +958,8 @@ class L2_Selector():
         # Plot L2-norm
         self.lineplot = self.ax1.plot(self.x_points,self.L2_sorted, linestyle='--', marker='o', color='b', zorder=0)
         self.scatter_2, = self.ax1.plot(self.x_points[self.idx],self.L2_sorted[self.idx] , marker='o', color='r')
+        if kl.knee is not None:
+            self.ax1.axvline(kl.knee, ymin = 0, ymax = 1, color = 'r', linestyle='dashed')
         
         textstr =  'Click to show specific cell.\nPress "w" or "e" for plus/muinus.'
         props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
@@ -1592,7 +1678,7 @@ class Selector_pca():
         
         # Save
         Image.fromarray(self.s_avg_residual_integrated_norm).save(
-            os.path.join(self.path, f'Signal_Averaged_Integrate_{self.idx}_Integrate_({self.roi_2.left:.2f}{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f}).tiff'))
+            os.path.join(self.path, f'Signal_Averaged_Integrate_{self.idx}_Integrate_({self.roi_2.left:.2f}-{self.roi_2.right:.2f})_Background_({self.roi_1.left:.2f}-{self.roi_1.right:.2f}).tiff'))
 
 
         # Plot averaged EELS map
