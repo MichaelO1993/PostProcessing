@@ -28,6 +28,7 @@ import cv2
 import scipy.ndimage as ndimage
 from scipy.fft import fftn, ifftn, fftfreq
 from kneed import KneeLocator
+from scipy.ndimage.filters import gaussian_filter1d
 
 class PostProcessor:
     def __init__(self):
@@ -81,51 +82,70 @@ class PostProcessor:
         self.s_darkfield.metadata.General.name = 'dark_field_image'
         print(f'Loaded reference image from {filename_darkfield}')
 ###########################
-    def align_spectra_init(self, n_plot = 60):        
+    def align_spectra_init(self):        
         # Decompose
         self.s_EELS = self.decompose_hs(self.s_EELS)
 
         # Plot scree plot
-        ax = self.s_EELS.plot_explained_variance_ratio(n=n_plot,vline=False)
+        ax = self.s_EELS.plot_explained_variance_ratio(vline=False)
         ax.set_title('Scree Plot')
 
+        # Create new summed signal
         s = hs.signals.Signal1D(np.sum(self.s_EELS,axis=(0,1)))
         # Adjust axes
         s.axes_manager[0].name = self.s_EELS.axes_manager[2].name
         s.axes_manager[0].scale = self.s_EELS.axes_manager[2].scale
         s.axes_manager[0].offset = self.s_EELS.axes_manager[2].offset
         s.axes_manager[0].size = self.s_EELS.axes_manager[2].size
-
-        self.roi_align = hs.roi.SpanROI(left=s.axes_manager[0].offset, right=s.axes_manager[0].offset + s.axes_manager[0].scale*s.axes_manager[0].size/4)
-
+        
+        # Init ROI
+        self.roi_align = hs.roi.SpanROI(
+            left=s.axes_manager[0].offset, 
+            right=s.axes_manager[0].offset + s.axes_manager[0].scale*s.axes_manager[0].size/4)
+        
+        # Interactive plot for region selection
         ax2 = s.plot()
         plt.gca().set_title("")
         textstr =  'Select feature for aligning'
         props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
         text = plt.gcf().text(0.5, 0.98, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props)
         self.roi_align.interactive(s, color='blue')
-
-    def align_spectra_calc(self, n=70, vmin = -0.5, vmax = 0.5):
+        
+    def plot_aligning(self, n=70, sigma = 1):        
+        # Denoise spectrum image
         self.n_align = n
         s_denoised = self.s_EELS.get_decomposition_model(int(n))
-
+        
+        # Smooth spectra
+        for i in range(0, s_denoised.data.shape[0]):
+            for j in range(0, s_denoised.data.shape[1]):
+                s_denoised.data[i,j] = gaussian_filter1d(s_denoised.data[i,j], sigma = sigma)
+                
+        # Plot spectrum image
+        print('With sliders different pixels of the spectrum image can be observed.')
+        s_denoised.plot(navigator='slider')
+        
+        return s_denoised
+        
+    def align_spectra_calc(self, s_denoised, vmin = -0.5, vmax = 0.5):
+        # Calculate spectra shifts
         shifts = s_denoised.estimate_shift1D(start = self.roi_align.left, 
                    end = self.roi_align.right, 
                    interpolate=True, number_of_interpolation_points=5)
-
+        # Plot reference image
         fig, (ax1, ax2) = plt.subplots(1, 2, sharey = True, sharex = True)
         ax1.imshow(self.s_darkfield.data)
         ax1.axis('off')
         ax1.set_title('Reference image')
-
+        # Plot spectra shift map
         ax2.imshow(shifts, vmin = vmin, vmax = vmax)
         ax2.axis('off')
         ax2.set_title('Spectra Shift')
 
-    def align_spectra_apply(self, max_shift = 0.5):
+    def align_spectra_apply(self, s_denoised, max_shift = 0.5):
+        # Generate new signal for aligned spectra
         self.s_EELS_shifted = self.s_EELS.deepcopy()
-        s_denoised = self.s_EELS.get_decomposition_model(int(self.n_align))
-
+        # Align spectra
         s_denoised.align1D(start = self.roi_align.left, 
                end = self.roi_align.right, 
                max_shift=max_shift, 
@@ -133,9 +153,11 @@ class PostProcessor:
                crop=True,
                also_align = [self.s_EELS_shifted])
 
+        # Generate energy vectors for plotting
         x_raw = np.arange(self.s_EELS.axes_manager[-1].offset, self.s_EELS.axes_manager[-1].offset + self.s_EELS.axes_manager[-1].scale*self.s_EELS.axes_manager[-1].size, self.s_EELS.axes_manager[-1].scale)
         x_aligned = np.arange(self.s_EELS_shifted.axes_manager[-1].offset, self.s_EELS_shifted.axes_manager[-1].offset + self.s_EELS_shifted.axes_manager[-1].scale*self.s_EELS_shifted.axes_manager[-1].size, self.s_EELS_shifted.axes_manager[-1].scale)
 
+        # Plot comparison of raw spectrum and aligned spectrum
         fig, ax1 = plt.subplots()
         ax1.plot(x_raw, self.s_EELS.sum(), label = 'raw')
         ax1.plot(x_aligned, self.s_EELS_shifted.sum(), label = 'aligned')
