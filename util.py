@@ -81,6 +81,32 @@ class PostProcessor:
         self.s_darkfield = hs.load(filename_darkfield)
         self.s_darkfield.metadata.General.name = 'dark_field_image'
         print(f'Loaded reference image from {filename_darkfield}')
+        
+        return
+
+    def save_fig(self, name, size = (3, 3)):#, get_img = False, axes = 0, cmap = None):
+
+        # Location of saving results
+        self.path_post = os.path.join(self.path_EELS, 'Post_Processing')
+
+         # If folder is already present, ask to overwrite files
+        if not os.path.exists(self.path_post):          
+            os.mkdir(self.path_post)
+            
+        #if get_img:
+        #    ax_list = fig.axes
+        #    img = ax_list[axes].get_array() 
+        #    if cmap is not None:
+        #        cm = plt.get_cmap(cmap)
+            
+        #else:
+        fig = plt.gcf()            
+        fig.set_size_inches(size[0], size[1])
+        fig.tight_layout()
+        fig.savefig(os.path.join(self.path_post, str(name) + '.png'), dpi = 400,  bbox_inches='tight', pad_inches=0.01)
+        print('Figure saved at: ' + os.path.join(self.path_post, str(name) + '.png'))
+
+        return
 ###########################
     def align_spectra_init(self):        
         # Decompose
@@ -111,6 +137,8 @@ class PostProcessor:
         text = plt.gcf().text(0.5, 0.98, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props)
         self.roi_align.interactive(s, color='blue')
         
+        return
+        
     def plot_aligning(self, n=70, sigma = 1):        
         # Denoise spectrum image
         self.n_align = n
@@ -133,7 +161,7 @@ class PostProcessor:
                    end = self.roi_align.right, 
                    interpolate=True, number_of_interpolation_points=5)
         # Plot reference image
-        fig, (ax1, ax2) = plt.subplots(1, 2, sharey = True, sharex = True)
+        fig, (ax1, ax2) = plt.subplots(1, 2, sharey = True, sharex = True, figsize = (4,4))
         ax1.imshow(self.s_darkfield.data)
         ax1.axis('off')
         ax1.set_title('Reference image')
@@ -141,6 +169,8 @@ class PostProcessor:
         ax2.imshow(shifts, vmin = vmin, vmax = vmax)
         ax2.axis('off')
         ax2.set_title('Spectra Shift')
+        
+        return
 
     def align_spectra_apply(self, s_denoised, max_shift = 0.5):
         # Generate new signal for aligned spectra
@@ -162,9 +192,12 @@ class PostProcessor:
         ax1.plot(x_raw, self.s_EELS.sum(), label = 'raw')
         ax1.plot(x_aligned, self.s_EELS_shifted.sum(), label = 'aligned')
         ax1.set_title('Aligning process')
+        ax1.set_xlabel('energy loss / eV')
+        ax1.set_ylabel('intensity / a.u.')
         ax1.legend()
+        fig.tight_layout()
             
-            
+        return
             
 ############################
     # Interactive crop region selection 
@@ -185,6 +218,8 @@ class PostProcessor:
         props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
         text = plt.gcf().text(0.5, 0.98, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props)
         self.roi_crop.interactive(s_crop, color='green')
+        
+        return
        
     # Crop EELS data
     def crop(self, roi_crop_in = None):
@@ -197,6 +232,8 @@ class PostProcessor:
         # Crop EELS data
         self.s_EELS_shifted.crop(2,start = left_value, end = right_value)
         print(f'Crop Region from {left_value:.2f} eV to {right_value:.2f} eV')
+        
+        return
      
     def decompose_hs(self, EELS):
         # for poisson no negative values allowed
@@ -216,6 +253,8 @@ class PostProcessor:
         # Plot scree plot
         ax = self.s_EELS_shifted.plot_explained_variance_ratio(n=n_plot,vline=False)
         ax.set_title('Scree Plot')
+        
+        return
         
     def clustering_init(self, n_denoise_cluster = 10, perplexity_tsne = 30):
         self.n_denoise_cluster = n_denoise_cluster
@@ -250,6 +289,8 @@ class PostProcessor:
         ax.plot(self.optics_model.reachability_[self.optics_model.ordering_], 'k.', alpha = 0.3) 
         ax.set_ylabel('Reachability Distance') 
         ax.set_title('Reachability Plot') 
+        
+        return
         
     def clustering(self, eps_optics = 1, cmap = 'tab10', shuffle = True):
         # Cluster spectra with given eps
@@ -326,6 +367,8 @@ class PostProcessor:
 
         fig2.tight_layout()
         
+        return
+        
     def clustering_spectra(self, k_min = 500):
         # Average over all pixels from the denoised SI by PCA
         sc = self.s_EELS_shifted.get_decomposition_model(self.n_denoise_cluster)
@@ -388,11 +431,15 @@ class PostProcessor:
         ax2.set_xlabel('Energy loss / eV')
         ax2.set_ylabel('Intensity / a.u.')
         
+        return
+        
     def atom_positioning(self, s_low = 4):
         self.s_low = s_low
         
         # Get atom position
         self.atom_positions = am.get_atom_positions(self.s_darkfield, separation=s_low, pca=True, subtract_background=True)
+        
+        return
        
     def atom_positioning_single(self, s_darkfield, atom_positions, stacking = False):
         # Add or remove indvidual atoms - close window if you finished
@@ -405,6 +452,8 @@ class PostProcessor:
         textstr =  'Click to add/remove atoms. Close figure after selection!'
         props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
         text = plt.gcf().text(0.5, 0.98, textstr, fontsize=8, horizontalalignment='center', verticalalignment='top', bbox=props)
+        
+        return
         
     def refine_positions(self):
         # Refine atom position by center of mass and 2d gaussians
@@ -427,12 +476,15 @@ class PostProcessor:
         scatter_atom = ax.scatter(x_px_plot,y_px_plot, c='r', s=4)
         ax.set_title('Refined atom positions')
 
+        return
 
     def lattice_calc(self):
         # Construct planes and navigated through it
         self.sublattice_A.construct_zone_axes()
         self.sublattice_A.plot_planes()
 
+        return
+    
     # Transformation matrix
     def transform_matrix(self, alpha, slope_y, sx, sy):
         slope_x = 0
@@ -564,6 +616,8 @@ class PostProcessor:
         plt.imshow(dark_field_image)
         plt.scatter(atom_position_a_transformed[:,0],atom_position_a_transformed[:,1], c='r', s=4)
         plt.title('Drift corrected dark field image')
+        
+        return
 
     def drift_on_off(self, drift_corr = True):
         if drift_corr:
@@ -575,7 +629,9 @@ class PostProcessor:
             self.darkfield_stacking = self.s_darkfield.data
             self.atom_position_stacking = np.array(self.atom_positions)
             self.labels_shaped_stacking = self.labels_shaped
-            self.EELS_data_stacking = self.s_EELS_shifted.data            
+            self.EELS_data_stacking = self.s_EELS_shifted.data        
+            
+        return
 
     def stacking(self, width, height, shift_x = 0, shift_y = 0):
         dark_field = self.darkfield_stacking
@@ -667,6 +723,8 @@ class PostProcessor:
             ax2.add_patch(point2)    
 
         print(f'Number of cells: {len(y_px_within_image)}')
+        
+        return
         
     def normalize_L2(self, img_arr, norming):
         # check if input is a stack or a single input
@@ -774,7 +832,7 @@ class PostProcessor:
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])        
      
-    
+        return
     
     def EELS_region(self):
         
@@ -814,56 +872,32 @@ class PostProcessor:
         # Get values for the background and signal
         self.roi_background.interactive(self.s, color='blue')
         self.roi_signal.interactive(self.s, color='green')
+        
+        return
 
     # Define background function
     def powerlaw(self, x, A, r):
-        return A * x**(-r)
-    def exponential(self, x, A, r):
-        return A * np.exp(-r*x)    
+        return A * x**(-r) 
     
-    def EELS_background(self, background_fun = 'Powerlaw', signal_plot = False):
-
-        # Define initial parameters and creating the fitting model, depending on the function
-        if background_fun == 'Powerlaw':
-            # Create fitting model
-            self.gmodel = Model(self.powerlaw)
-
-            # Add required parameters (incl. constraints)
-            params = Parameters()
-            params.add('A', value=1000, min=0, max=np.inf, vary = True)
-            params.add('r', value=1, min=0, max=np.inf, vary = True)
-
-        elif background_fun == 'Exponential':
-            # Create fitting model
-            self.gmodel = Model(self.exponential)
-
-            # Add required parameters (incl. constraints)
-            params = Parameters()
-            params.add('A', value=450, min=0, max=np.inf, vary = True)
-            params.add('r', value=0.01, min=0, max=np.inf, vary = True)
+    def EELS_background(self, background_fit = 'Power law', signal_plot = False):
 
         # Calculate x-axes vector
         x_axes_background = np.arange(self.roi_background.left, self.roi_background.right, self.s.axes_manager[0].scale)
         x_axes_signal = np.arange(self.roi_signal.left, self.roi_signal.right, self.s.axes_manager[0].scale)
         x_axes = np.arange(self.s.axes_manager[0].offset, self.s.axes_manager[0].offset + self.s.axes_manager[0].scale*self.s.axes_manager[0].size, self.s.axes_manager[0].scale)
 
-        # Crop spectrum to background roi
-        s_fit = self.s.isig[self.roi_background].data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1])
-        # Fit averaged spectrum to get better estimation for initial parameters for each pixel
-        self.result_fit = self.gmodel.fit(s_fit, params, x=x_axes_background)
-
         # Selected energy ranges
         print(f'Background: {(self.roi_background.right - self.roi_background.left):.2f} eV from {self.roi_background.left:.2f} eV to {self.roi_background.right:.2f} eV')
         print(f'Signal: {(self.roi_signal.right - self.roi_signal.left):.2f} eV from {self.roi_signal.left:.2f} eV to {self.roi_signal.right:.2f} eV')
 
+        # Background Subtraction
+        s_back_sub = self.s.remove_background(signal_range=(self.roi_background.left,self.roi_background.right), background_type=background_fit, fast = False)
         # Plot signal and fitted background
         figure, ax = plt.subplots(1, 1)
         if not signal_plot:
-            ax.plot(x_axes,self.s.data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1]), label = 'EELS')
-            ax.plot(x_axes,self.gmodel.eval(self.result_fit.params, x=x_axes), label = 'Background')
-            ax.plot(x_axes_background,self.result_fit.init_fit,'r--', label = 'Initial guess')
-        ax.plot(x_axes,self.s.data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1])-self.gmodel.eval(self.result_fit.params, x=x_axes), label = 'Residual', color = 'green')   
-        ax.fill_between(x_axes_signal,self.s.isig[self.roi_signal].data/(self.EELS_sum_aligned.shape[0]*self.EELS_sum_aligned.shape[1])-self.gmodel.eval(self.result_fit.params, x=x_axes_signal), alpha = 0.3, facecolor = 'green')
+            ax.plot(x_axes,self.s.data, label = 'EELS')
+        ax.plot(x_axes,s_back_sub.data, label = 'Residual', color = 'green')   
+        ax.fill_between(x_axes_signal,s_back_sub.isig[self.roi_signal].data, alpha = 0.3, facecolor = 'green')
         ax.plot([np.amin(x_axes), np.amax(x_axes)],[0, 0],'k--')
         
         
@@ -874,7 +908,7 @@ class PostProcessor:
         ax.set_ylabel('Intensity / a.u.')
 
 
-
+        return
         
 class atom_selector:
     def __init__(self, atom_positions, s_darkfield, label = None, newcmp = None, map_label = False):
@@ -1626,20 +1660,17 @@ class Aligner:
     
 # Plotting and saving results    
 class Selector_pca():
-    def __init__(self,analyse, d_neighbour, background_removal_pca, n_back):
+    def __init__(self,analyse, background_fit = 'Power law', fast = False):
         # Initialize variables
         self.s_averaged = analyse.s_averaged_orig
+        self.s_averaged.set_signal_type("EELS")
         self.roi_1 = analyse.roi_background
         self.roi_2 = analyse.roi_signal
         self.darkfield_aligned_averaged_norm = (analyse.darkfield_plot - np.amin(analyse.darkfield_plot))/(np.amax(analyse.darkfield_plot) - np.amin(analyse.darkfield_plot))
         self.path_EELS = analyse.path_EELS
-        self.para_init = analyse.result_fit.params
-        self.gmodel = analyse.gmodel
         self.poisson_noise = analyse.poisson_noise
-        
-        self.background = background_removal_pca
-        self.d = d_neighbour
-        self.n_back = n_back
+        self.background = background_fit
+        self.fast = fast
         
         self.s_eels = None
 
@@ -1694,7 +1725,8 @@ class Selector_pca():
         ## Plot ax3
         
         # Plot EELS map from averaged EELS signal
-        self.s_avg_residual = self.background_subtraction(self.gmodel, self.s_averaged, self.roi_1, self.para_init, self.d)
+        self.s_avg_residual = self.s_averaged.remove_background(signal_range=(self.roi_1.left,self.roi_1.right),
+                        background_type=self.background, fast = self.fast)
         self.s_avg_residual_integrated = self.s_avg_residual.isig[self.roi_2].integrate1D(-1)
         self.s_avg_residual_integrated_norm =self.normalize(self.s_avg_residual_integrated)
         
@@ -1708,28 +1740,12 @@ class Selector_pca():
        
         
         ## Plot ax4
-        
-        # If background true --> denoise spectra --> remove background from raw data --> denoise spectra --> integrate        
-        if self.background:
-            self.s_averaged.decomposition(normalize_poissonian_noise = self.poisson_noise)
-            # Denoise spectra
-            self.s_pca_background = self.s_averaged.get_decomposition_model(int(self.n_back))
-            # Remove PCA-denoised background from raw data
-            self.s_pca_residual = self.background_subtraction(self.gmodel, self.s_pca_background, self.roi_1, self.para_init, self.d, self.s_averaged)
-            
-            if self.poisson_noise:
-                self.s_pca_residual.data[self.s_pca_residual.data < 0] = 0            
-            
-            # Decompose residual
-            self.s_pca_residual.decomposition(normalize_poissonian_noise = self.poisson_noise)   
-            
-        # If background false --> denoise spectra --> remove background from denoised spectra --> integrate        
-        else:
-            # Decompose raw data
-            self.s_pca_residual = self.s_averaged
-            self.s_pca_residual.decomposition(normalize_poissonian_noise = self.poisson_noise)   
 
-        self.s_pca_s_arr = self.pca_denoise(self.s_pca_residual, self.background)
+        # Decompose raw data
+        self.s_pca_residual = self.s_averaged
+        self.s_pca_residual.decomposition(normalize_poissonian_noise = self.poisson_noise)   
+
+        self.s_pca_s_arr = self.pca_denoise(self.s_pca_residual, n = None)
         
         self.p_pca_s_arr = self.ax4.imshow(self.s_pca_s_arr)
         
@@ -1817,7 +1833,7 @@ class Selector_pca():
     
     def plot(self):
         
-        self.signal_arr = self.pca_denoise(self.s_averaged, self.background)
+        self.signal_arr = self.pca_denoise(self.s_averaged, n = None)
         
         self.p_pca_s_arr.set_data(self.signal_arr)
         
@@ -1836,111 +1852,32 @@ class Selector_pca():
         s_arr = s.data
         return (s_arr-np.amin(s_arr))/(np.amax(s_arr)-np.amin(s_arr))
     
-    # Function for fitting the background with local background averaging (and linear combination of powerlaws) --> returns the signal
-    def background_subtraction(self, gmodel, s_hs, roi_background, para_init, d = 0, s_raw = None):
-        s_shape = s_hs.data.shape
 
-        # x-vector for background fitting
-        x_axes_b = np.arange(roi_background.left, roi_background.right, s_hs.axes_manager[-1].scale)
-        x_axes = np.arange(s_hs.axes_manager[-1].offset, s_hs.axes_manager[-1].offset + s_hs.axes_manager[-1].scale*s_hs.axes_manager[-1].size, s_hs.axes_manager[-1].scale)
-
-        # Crop signal for background fitting
-        s_fit = s_hs.isig[roi_background].data
-
-        # Flatten spectrum image for easier indexing
-        s_flatten = s_fit.reshape(-1, s_fit.shape[-1])
-
-        # Array, which saves signal
-        s_residual = np.zeros(s_shape)
-
-        for i in tqdm_notebook(range(0,s_shape[0])):
-            for j in range(0,s_shape[1]):
-                # Get average EELS spectrum from d-neighbors
-                s_summed = self.cell_neighbors(s_flatten, s_shape, i, j, d=d)
-                # Fit background for averaged EELS spectrum
-                results = gmodel.fit(s_summed, params = para_init, x=x_axes_b)
-                # Subtract background from the signal
-                background_fitted = gmodel.eval(results.params, x=x_axes)
-                
-                if s_raw == None:
-                    s_residual[i,j,:] = s_hs.data[i,j,:] - background_fitted
-                else:
-                    s_residual[i,j,:] = s_raw.data[i,j,:] - background_fitted
-                    
-        s_residuals = copy.deepcopy(s_hs)
-        s_residuals.data = s_residual
-
-        return s_residuals
-
-    def pca_denoise(self, s_raw, background, n = None):
+    def pca_denoise(self, s_raw, n = None):
         if n == None:
             n = self.idx
-        
-        if background:
-            # Denoise residual
-            s_pca_residual_denoised = s_raw.get_decomposition_model(int(n))
-            self.s_eels = s_pca_residual_denoised.deepcopy()
-            
-        else:
-            
-            # Denoise spectra
-            s_pca_background = s_raw.get_decomposition_model(int(n))
-            self.s_eels = s_pca_background.deepcopy()
-            # Remove PCA-denoised background from denoised data
-            s_pca_residual_denoised = self.background_subtraction(self.gmodel, s_pca_background, self.roi_1, self.para_init, self.d)
+
+        # Denoise spectra
+        s_pca_background = s_raw.get_decomposition_model(int(n))
+        s_pca_background.set_signal_type("EELS")
+        self.s_eels = s_pca_background.deepcopy()
+        # Remove PCA-denoised background from denoised data
+        s_pca_residual_denoised = s_pca_background.remove_background(signal_range=(self.roi_1.left,self.roi_1.right),
+                        background_type=self.background, fast = self.fast)
 
         s_pca_signal =  s_pca_residual_denoised.isig[self.roi_2].integrate1D(-1)   
         s_pca_s_arr = self.normalize(s_pca_signal)
         
         return s_pca_s_arr
 
-        
-    
-    # Following two function are used for local background averaging 
-    def sliding_window(self, arr, window_size):
-        """ Construct a sliding window view of the array"""
-        arr = np.asarray(arr)
-        window_size = int(window_size)
-        if arr.ndim != 2:
-            raise ValueError("need 2-D input")
-        if not (window_size > 0):
-            raise ValueError("need a positive window size")
-        shape = (arr.shape[0] - window_size + 1,
-                 arr.shape[1] - window_size + 1,
-                 window_size, window_size)
-        if shape[0] <= 0:
-            shape = (1, shape[1], arr.shape[0], shape[3])
-        if shape[1] <= 0:
-            shape = (shape[0], 1, shape[2], arr.shape[1])
-        strides = (arr.shape[1]*arr.itemsize, arr.itemsize,
-                   arr.shape[1]*arr.itemsize, arr.itemsize)
-        return as_strided(arr, shape=shape, strides=strides)
 
-    def cell_neighbors(self, s_flatten,s_shape, i, j, d):
-        """Return d-th neighbors of cell (i, j)"""
-        arr = np.arange(s_shape[0]*s_shape[1]).reshape(s_shape[0], s_shape[1])
-        w = self.sliding_window(arr, 2*d+1)
-
-        ix = np.clip(i - d, 0, w.shape[0]-1)
-        jx = np.clip(j - d, 0, w.shape[1]-1)
-
-        i0 = max(0, i - d - ix)
-        j0 = max(0, j - d - jx)
-        i1 = w.shape[2] - max(0, d - i + ix)
-        j1 = w.shape[3] - max(0, d - j + jx)
-
-        elements = w[ix, jx][i0:i1,j0:j1].ravel()
-
-        s_sum = np.sum(s_flatten[elements,:],axis=0)/(len(elements))
-
-        return s_sum
     
     def save_eels(self, pca_denoised = True, n = None):
         if n == None:
             n = self.idx
             
         if pca_denoised:
-            s_arr_save = self.pca_denoise(self.s_pca_residual, self.background, n)
+            s_arr_save = self.pca_denoise(self.s_pca_residual, n)
             s_pca_denoise_save = self.s_averaged.copy()
             s_pca_denoise_save.data = s_arr_save.astype(np.float32)
             path = os.path.join(self.path_post, f'EELS_denoised_n_{n}.rpl')
