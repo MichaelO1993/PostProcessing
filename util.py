@@ -30,6 +30,7 @@ from scipy.fft import fftn, ifftn, fftfreq
 from kneed import KneeLocator
 from scipy.ndimage.filters import gaussian_filter1d
 
+
 class PostProcessor:
     def __init__(self):
         self.s_EELS = None
@@ -155,13 +156,19 @@ class PostProcessor:
         
         return s_denoised
         
-    def align_spectra_calc(self, s_denoised, vmin = -0.5, vmax = 0.5):
+    def align_spectra_calc(self, s_denoised, max_shift = 0.5,  sigma = [0, 1],  vmin = -0.5, vmax = 0.5):
         # Calculate spectra shifts
         shifts = s_denoised.estimate_shift1D(start = self.roi_align.left, 
                    end = self.roi_align.right, 
                    interpolate=True, number_of_interpolation_points=5)
+        
+        shift_processed = shifts
+        shift_processed[np.abs(shift_processed) >= max_shift] = 0
+        shift_px = np.round(ndimage.filters.gaussian_filter(shift_processed, sigma, mode='constant')/self.s_EELS.axes_manager[-1].scale).astype(np.int32)        
+        
+        
         # Plot reference image
-        fig, (ax1, ax2) = plt.subplots(1, 2, sharey = True, sharex = True, figsize = (4,4))
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey = True, sharex = True, figsize = (4,4))
         ax1.imshow(self.s_darkfield.data)
         ax1.axis('off')
         ax1.set_title('Reference image')
@@ -169,19 +176,27 @@ class PostProcessor:
         ax2.imshow(shifts, vmin = vmin, vmax = vmax)
         ax2.axis('off')
         ax2.set_title('Spectra Shift')
+        # Plot processed shift map
+        ax3.imshow(shift_px, vmin = vmin/self.s_EELS.axes_manager[-1].scale, vmax = vmax/self.s_EELS.axes_manager[-1].scale)
+        ax3.axis('off')
+        ax3.set_title('Processed Spectra Shift')
         
-        return
+        return shift_px
 
-    def align_spectra_apply(self, s_denoised, max_shift = 0.5):
+    def align_spectra_apply(self, shifts):
         # Generate new signal for aligned spectra
         self.s_EELS_shifted = self.s_EELS.deepcopy()
         # Align spectra
-        s_denoised.align1D(start = self.roi_align.left, 
-               end = self.roi_align.right, 
-               max_shift=max_shift, 
-               interpolate=True, number_of_interpolation_points=5, interpolation_method='linear', 
-               crop=True,
-               also_align = [self.s_EELS_shifted])
+        for i in tqdm_notebook(range(self.s_EELS.data.shape[0])):
+            for j in range(self.s_EELS.data.shape[1]):
+                self.s_EELS_shifted.data[i, j, :] = np.roll(self.s_EELS_shifted.data[i, j, :], shifts[i, j])
+        
+        #s_denoised.align1D(start = self.roi_align.left, 
+        #       end = self.roi_align.right, 
+        #       max_shift=max_shift, 
+        #       interpolate=True, number_of_interpolation_points=5, interpolation_method='linear', 
+        #       crop=True,
+        #       also_align = [self.s_EELS_shifted])
 
         # Generate energy vectors for plotting
         x_raw = np.arange(self.s_EELS.axes_manager[-1].offset, self.s_EELS.axes_manager[-1].offset + self.s_EELS.axes_manager[-1].scale*self.s_EELS.axes_manager[-1].size, self.s_EELS.axes_manager[-1].scale)
@@ -196,8 +211,8 @@ class PostProcessor:
         ax1.set_ylabel('intensity / a.u.')
         ax1.legend()
         fig.tight_layout()
-            
-        return
+
+        return 
             
 ############################
     # Interactive crop region selection 
@@ -292,11 +307,22 @@ class PostProcessor:
         
         return
         
-    def clustering(self, eps_optics = 1, cmap = 'tab10', shuffle = True):
+    def clustering(self, eps_optics = 1, n_split = [], cmap = 'tab10', shuffle = True):
+        
+        # Define how many different splittings shall be calculated (indexing)
+        n_splitting = [0]
+        n_splitting.extend(n_split)
+        n_splitting.extend([-1])
+        
+        # Scale reachability to calculated cluster_optics_dbscan only once (scale to eps = 1)
+        reachability_modified = np.copy(self.optics_model.reachability_)
+        for i in range(0, len(n_splitting) - 1):
+            reachability_modified[self.optics_model.ordering_[n_splitting[i]:n_splitting[i + 1]]] /= eps_optics[i]
+        
         # Cluster spectra with given eps
-        self.labels_eps = cluster_optics_dbscan(reachability=self.optics_model.reachability_,
+        self.labels_eps = cluster_optics_dbscan(reachability=reachability_modified,
                                            core_distances=self.optics_model.core_distances_,
-                                           ordering=self.optics_model.ordering_, eps=eps_optics)
+                                           ordering=self.optics_model.ordering_, eps=1)
 
         # Storing the reachability distance of each point 
         reachability = self.optics_model.reachability_[self.optics_model.ordering_] 
@@ -341,6 +367,14 @@ class PostProcessor:
                 ax11.plot(Xk_r, Rk, color=colour, alpha = 0.5,linestyle="",marker=".") 
                 ax12.plot(Xk_o.iloc[:, 0], Xk_o.iloc[:, 1], color=colour, alpha = 0.5,linestyle="",marker=".")  
 
+        # Plot used eps values and regions
+        x = np.arange(0,len(reachability))
+        for idx in range(0,len(n_splitting) - 1):#enumerate(eps_optics):
+            ax11.plot((x[n_splitting[idx]],x[n_splitting[idx + 1]]),(eps_optics[idx], eps_optics[idx]), 'k--')
+            ax11.text(x = x[n_splitting[idx]], y = eps_optics[idx], s = 'Eps ' + str(idx), 
+                      horizontalalignment = 'left', verticalalignment = 'bottom')
+  
+                
         ax11.set_ylabel('Reachability Distance') 
         ax11.set_title('Reachability Plot') 
 
