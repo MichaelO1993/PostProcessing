@@ -169,15 +169,15 @@ class PostProcessor:
         
         # Plot reference image
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey = True, sharex = True, figsize = (4,4))
-        ax1.imshow(self.s_darkfield.data)
+        ax1.imshow(self.s_darkfield.data, cmap = 'gray')
         ax1.axis('off')
         ax1.set_title('Reference image')
         # Plot spectra shift map
-        ax2.imshow(shifts, vmin = vmin, vmax = vmax)
+        ax2.imshow(shifts, vmin = vmin, vmax = vmax, cmap = 'inferno')
         ax2.axis('off')
         ax2.set_title('Spectra Shift')
         # Plot processed shift map
-        ax3.imshow(shift_px, vmin = vmin/self.s_EELS.axes_manager[-1].scale, vmax = vmax/self.s_EELS.axes_manager[-1].scale)
+        ax3.imshow(shift_px, vmin = vmin/self.s_EELS.axes_manager[-1].scale, vmax = vmax/self.s_EELS.axes_manager[-1].scale, cmap = 'inferno')
         ax3.axis('off')
         ax3.set_title('Processed Spectra Shift')
         
@@ -307,7 +307,8 @@ class PostProcessor:
         
         return
         
-    def clustering(self, eps_optics = 1, n_split = [], cmap = 'tab10', shuffle = True):
+    def clustering(self, eps_optics = 1, n_split = [], cmap = 'tab10', k_min = 0):
+        self.k_min = k_min
         
         # Define how many different splittings shall be calculated (indexing)
         n_splitting = [0]
@@ -335,32 +336,39 @@ class PostProcessor:
         labels = self.labels_eps[self.optics_model.ordering_]
         
         
-        # If smaller than 0, no clusters are found
-        if np.amax(labels) < 0:
-            n_samples = 0
-        else:
-            n_samples = np.amax(labels)
-
-        #Creating colors from specific color map (colormap can be changed)
-        cmap = plt.get_cmap(cmap, n_samples+1) # n_samples+1 to consider the no-cluster
-        self.colors = [cmap(i) for i in np.linspace(0, 1, n_samples+1)]
-        if shuffle:
-            random.shuffle(self.colors) # shuffle color for better visualization
-        self.colors.insert(0,[0, 0, 0, 1.0]) # add black for the no-cluster
+        # Count the number of clusters with more points than k_min
+        labels_unique = np.unique(labels)
+        n_samples = 0
+        for i in range(0, len(labels_unique)):
+            if len(labels[labels == labels_unique[i]]) >= k_min and labels_unique[i] != -1:
+                n_samples += 1
+        #Creating colors from specific color map 
+        cmap = plt.get_cmap(cmap, n_samples)
+        colors_map = [cmap(i) for i in np.linspace(0, 1, n_samples)]
+        
+        # Assign colors to the correct labels
+        self.colors = []
+        k = 0
+        for i in range(0, len(labels_unique)):
+            if len(labels[labels == labels_unique[i]]) >= k_min and labels_unique[i] != -1:
+                self.colors.append(colors_map[k])
+                k += 1
+            else:
+                self.colors.append([0, 0, 0, 1.0])        
 
         # Plotting results (coloured reachability and coloured t-SNE plot)
         fig1, (ax11, ax12) = plt.subplots(1, 2)
         fig1.suptitle('OPTICS result')
 
-        for Class, colour  in zip(range(-1, n_samples), self.colors): 
+        for idx, colour  in enumerate(self.colors): 
             # Coloured reachability-distance plot 
-            Xk_r = space[labels == Class] 
-            Rk = reachability[labels == Class] 
+            Xk_r = space[labels == labels_unique[idx]] 
+            Rk = reachability[labels == labels_unique[idx]] 
 
             # Coloured OPTICS Clustering 
-            Xk_o = self.df[self.labels_eps == Class]   
+            Xk_o = self.df[self.labels_eps == labels_unique[idx]]   
 
-            if Class == -1:
+            if labels_unique[i] == -1:
                 ax11.plot(Xk_r, Rk, color=colour, alpha = 0.3,linestyle="",marker=".")
                 ax12.plot(Xk_o.iloc[:, 0], Xk_o.iloc[:, 1], color=colour, alpha = 0.3,linestyle="",marker=".")  
             else:
@@ -403,18 +411,18 @@ class PostProcessor:
         
         return
         
-    def clustering_spectra(self, k_min = 500):
+    def clustering_spectra(self, k_min = None):
+        if k_min == None:
+            k_min = self.k_min
         # Average over all pixels from the denoised SI by PCA
         sc = self.s_EELS_shifted.get_decomposition_model(self.n_denoise_cluster)
-        sc_averaged = np.mean(sc.data,axis=(0,1))
-        sc_averaged = sc_averaged[:,np.newaxis]
+        sc_averaged = []
 
         # Average over all pixels from the original SI
-        s_averaged = np.mean(self.s_EELS_shifted.data,axis=(0,1))
-        s_averaged = s_averaged[:,np.newaxis]
+        s_averaged = []
 
         # First element is the over all averaged spectra in black
-        label_color = [-1]
+        label_color = []
 
         # Loop over all labels
         labels_unique = np.unique(self.labels_shaped)
@@ -425,21 +433,19 @@ class PostProcessor:
             if len(self.labels_shaped[self.labels_shaped == label_unique]) >= k_min and label_unique != -1:
 
                 # Add label to the color list
-                label_color = np.append(label_color,label_unique)
+                label_color.append(self.colors[idx])
 
                 # Average all spectra with the same label (PCA denoised)
                 sc_vec = np.reshape(sc.data, ( self.labels_eps.shape[0], sc.data.shape[2]))
                 a = np.mean(sc_vec[self.labels_eps == label_unique],axis=0)
-                a = a[:,np.newaxis]
-                sc_averaged = np.append(sc_averaged,a,axis=1)
+                sc_averaged.append(a)
 
                 # Average all spectra with the same label (original)
                 s_vec = np.reshape(self.s_EELS_shifted.data, ( self.labels_eps.shape[0], self.s_EELS_shifted.data.shape[2]))
                 a = np.mean(s_vec[self.labels_eps == label_unique],axis=0)
-                a = a[:,np.newaxis]
-                s_averaged = np.append(s_averaged,a,axis=1)
+                s_averaged.append(a)
 
-        print(f'Number of clusters for plotting: {(sc_averaged.shape[1]-1)}')
+        print(f'Number of clusters for plotting: {len(sc_averaged)}')
         
         # Extract the energy axes for a correct x-axes
         energy_axes = np.linspace(self.s_EELS_shifted.axes_manager["Energy loss"].offset,self.s_EELS_shifted.axes_manager["Energy loss"].offset+self.s_EELS_shifted.axes_manager["Energy loss"].scale*self.s_EELS_shifted.axes_manager["Energy loss"].size,self.s_EELS_shifted.axes_manager["Energy loss"].size)
@@ -448,14 +454,9 @@ class PostProcessor:
         fig, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
         fig.suptitle('Averaged EELS with same clusters')
 
-        for i in range(0,sc_averaged.shape[1]):
-            # Select correct color
-            if label_color[i] == -1: # aveaged spectra in black
-                colour = self.colors[0]
-            else:
-                colour = self.colors[int(label_color[i])+1]
-            ax1.plot(energy_axes, sc_averaged[:,i], color = colour)
-            ax2.plot(energy_axes, s_averaged[:,i], color = colour)
+        for i in range(0,len(sc_averaged)):
+            ax1.plot(energy_axes, sc_averaged[i], color = label_color[i])
+            ax2.plot(energy_axes, s_averaged[i], color = label_color[i])
 
         ax1.set_title('PCA denoised') 
         ax1.set_xlabel('Energy loss / eV')
@@ -506,7 +507,7 @@ class PostProcessor:
         y_px_plot = atom_lattice.y_position
 
         fig, ax = plt.subplots()
-        ax.imshow(self.s_darkfield.data)
+        ax.imshow(self.s_darkfield.data, cmap = 'gray')
         scatter_atom = ax.scatter(x_px_plot,y_px_plot, c='r', s=4)
         ax.set_title('Refined atom positions')
 
@@ -647,7 +648,7 @@ class PostProcessor:
         
         # Plot drift corrected images
         plt.figure()
-        plt.imshow(dark_field_image)
+        plt.imshow(dark_field_image, cmap = 'gray')
         plt.scatter(atom_position_a_transformed[:,0],atom_position_a_transformed[:,1], c='r', s=4)
         plt.title('Drift corrected dark field image')
         
@@ -727,7 +728,7 @@ class PostProcessor:
 
         # Cropping rectangulars from the dark field image and stack them & plot dark field image incl the cells
         fig, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
-        ax1.imshow(dark_field)
+        ax1.imshow(dark_field, cmap = 'gray')
         ax2.matshow(labels,cmap=self.newcmp)
 
         for i in range(0, len(y_px_within_image)):
@@ -858,10 +859,10 @@ class PostProcessor:
              if not i in L2_excluded:
                 self.darkfield_plot += self.darkfield_aligned[:,:,i]
         
-        ax2.imshow(self.darkfield_plot)
+        ax2.imshow(self.darkfield_plot, cmap = 'gray')
         ax2.set_title('Reduced')
 
-        ax1.imshow(np.sum(self.darkfield_aligned,axis = -1))
+        ax1.imshow(np.sum(self.darkfield_aligned,axis = -1), cmap = 'gray')
         ax1.set_title('All')
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])        
@@ -972,7 +973,7 @@ class atom_selector:
             self.ax2.matshow(self.label, cmap=self.newcmp)
             self.scatter_atom_2 = self.ax2.scatter(self.atom_positions[:,0],self.atom_positions[:,1], c='k', edgecolors = 'w', s=18)
             
-        self.ax1.imshow(self.s_darkfield.data)
+        self.ax1.imshow(self.s_darkfield.data, cmap = 'gray')
         self.scatter_atom = self.ax1.scatter(self.atom_positions[:,0],self.atom_positions[:,1], c='r', s=4)
         
         textstr =  'Click and drag to draw a rectangle.\nPress "d" to remove atoms.\nPress "t" to toggle the selector on and off.'
@@ -1060,7 +1061,7 @@ class L2_Selector():
         self.ax2.set_title('Cell:' + str(self.idx + 1))
 
         # Plot cells (initialize with first cell)
-        self.l2_plot = self.ax2.imshow(self.darkfield_aligned_norm[:,:,self.idx])
+        self.l2_plot = self.ax2.imshow(self.darkfield_aligned_norm[:,:,self.idx], cmap = 'gray')
         #self.l2_plot.set_clim(vmin=0, vmax=1)
 
         # Connect
@@ -1662,17 +1663,17 @@ class Aligner:
     def plot_aligned(self):
         self.fig, ((ax1, ax2), (self.ax3, self.ax4)) = plt.subplots(2,2, sharex=True, sharey=True)
         
-        ax1.imshow(np.sum(self.images, axis = 2))
+        ax1.imshow(np.sum(self.images, axis = 2), cmap = 'gray')
         ax1.set_title('Raw images')
 
-        ax2.imshow(np.sum(self.image_align, axis = 2))
+        ax2.imshow(np.sum(self.image_align, axis = 2), cmap = 'gray')
         ax2.set_title('Aligned images')
         
-        self.plot_anim3 = self.ax3.imshow(self.images[:,:,0])
+        self.plot_anim3 = self.ax3.imshow(self.images[:,:,0], cmap = 'gray')
         self.plot_anim3.set_clim(vmin=np.amin(self.images), vmax=np.amax(self.images))
         self.ax3.set_title(f'Raw: Cell {0}')
 
-        self.plot_anim4 = self.ax4.imshow(self.image_align[:,:,0])
+        self.plot_anim4 = self.ax4.imshow(self.image_align[:,:,0], cmap = 'gray')
         self.plot_anim4.set_clim(vmin=np.amin(self.image_align), vmax=np.amax(self.image_align))
         self.ax4.set_title(f'Aligned: Cell {0}')
         
@@ -1753,7 +1754,7 @@ class Selector_pca():
         ## Plot ax2
         
         # Plot darkfield image
-        self.ax2.imshow(self.darkfield_aligned_averaged_norm)
+        self.ax2.imshow(self.darkfield_aligned_averaged_norm, cmap = 'gray')
         
         
         ## Plot ax3
